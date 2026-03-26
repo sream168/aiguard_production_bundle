@@ -51,3 +51,9 @@ func (m *Manager) Cancel(taskID string) error {
 	delete(m.tasks, taskID)
 	return nil
 }
+
+func (m *Manager) HasRunning() bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return len(m.tasks) > 0
+}

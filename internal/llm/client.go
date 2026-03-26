@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -23,12 +24,16 @@ type Client struct {
 }
 
 func New(cfg config.Config) *Client {
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	transport.Proxy = buildProxyFunc(cfg.OpenAI.Proxy)
+
 	return &Client{
 		baseURL: strings.TrimRight(strings.TrimSpace(cfg.OpenAI.BaseURL), "/"),
 		apiKey:  strings.TrimSpace(cfg.OpenAI.APIKey),
 		model:   strings.TrimSpace(cfg.OpenAI.DefaultModel),
 		httpClient: &http.Client{
-			Timeout: time.Duration(cfg.Runtime.RequestTimeoutSec) * time.Second,
+			Timeout:   time.Duration(cfg.Runtime.RequestTimeoutSec) * time.Second,
+			Transport: transport,
 		},
 		maxRetry: cfg.Runtime.MaxRetry,
 	}
@@ -36,6 +41,24 @@ func New(cfg config.Config) *Client {
 
 func (c *Client) Enabled() bool {
 	return c.baseURL != "" && c.model != ""
+}
+
+func (c *Client) Ping(ctx context.Context) error {
+	if !c.Enabled() {
+		return errors.New("LLM 未配置")
+	}
+	content, err := c.chat(ctx,
+		"You are a health check assistant.",
+		"Reply with OK.",
+		8,
+	)
+	if err != nil {
+		return err
+	}
+	if strings.TrimSpace(content) == "" {
+		return errors.New("LLM 健康检查返回为空")
+	}
+	return nil
 }
 
 func (c *Client) ChatJSON(ctx context.Context, systemPrompt, userPrompt string, maxTokens int, out any) error {
@@ -144,6 +167,59 @@ func (c *Client) chat(ctx context.Context, systemPrompt, userPrompt string, maxT
 	default:
 		return "", errors.New("模型返回内容格式无法识别")
 	}
+}
+
+func buildProxyFunc(proxyCfg config.ProxyConfig) func(*http.Request) (*url.URL, error) {
+	if !proxyCfg.Enabled {
+		return nil
+	}
+	if strings.TrimSpace(proxyCfg.URL) != "" {
+		if proxyURL, err := url.Parse(strings.TrimSpace(proxyCfg.URL)); err == nil {
+			return http.ProxyURL(proxyURL)
+		}
+	}
+	return func(req *http.Request) (*url.URL, error) {
+		if req == nil || req.URL == nil {
+			return nil, nil
+		}
+		if shouldBypassProxy(req.URL.Hostname(), proxyCfg.NoProxy) {
+			return nil, nil
+		}
+		candidate := ""
+		switch strings.ToLower(strings.TrimSpace(req.URL.Scheme)) {
+		case "https":
+			candidate = strings.TrimSpace(proxyCfg.HTTPS)
+			if candidate == "" {
+				candidate = strings.TrimSpace(proxyCfg.HTTP)
+			}
+		default:
+			candidate = strings.TrimSpace(proxyCfg.HTTP)
+			if candidate == "" {
+				candidate = strings.TrimSpace(proxyCfg.HTTPS)
+			}
+		}
+		if candidate == "" {
+			return nil, nil
+		}
+		return url.Parse(candidate)
+	}
+}
+
+func shouldBypassProxy(host, noProxy string) bool {
+	host = strings.ToLower(strings.TrimSpace(host))
+	if host == "" || strings.TrimSpace(noProxy) == "" {
+		return false
+	}
+	for _, item := range strings.Split(noProxy, ",") {
+		item = strings.ToLower(strings.TrimSpace(item))
+		if item == "" {
+			continue
+		}
+		if host == item || strings.HasSuffix(host, "."+item) {
+			return true
+		}
+	}
+	return false
 }
 
 func extractJSON(content string) (string, error) {

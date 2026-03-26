@@ -1,0 +1,15 @@
+workspace/
+release/
+frontend/node_modules/
+frontend/dist/
+build/bin/
+dist/
+*.log
+*.tmp
+*.out
+*.zip
+*.msi
+*.dmg
+.DS_Store
+Thumbs.db
+

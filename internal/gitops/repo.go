@@ -8,9 +8,9 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 
 	"aiguard/internal/model"
@@ -27,24 +27,58 @@ func (m *Manager) EnsureBareRepo(ctx context.Context, repoURL, reposDir string) 
 	if repoURL == "" {
 		return "", errors.New("仓库地址为空")
 	}
+	gitDir, _, err := m.PrepareRemoteRepo(ctx, []string{repoURL}, reposDir, repoURL)
+	return gitDir, err
+}
 
-	key := repoKey(repoURL)
-	target := filepath.Join(reposDir, key+".git")
-	if _, err := os.Stat(target); err == nil {
-		return target, nil
+func (m *Manager) OpenCachedRepo(reposDir, repoIdentity string) (string, error) {
+	repoIdentity = strings.TrimSpace(repoIdentity)
+	if repoIdentity == "" {
+		return "", errors.New("仓库标识为空")
 	}
-
-	if err := os.MkdirAll(reposDir, 0o755); err != nil {
+	target := filepath.Join(reposDir, repoKey(repoIdentity)+".git")
+	if _, err := os.Stat(target); err != nil {
+		if os.IsNotExist(err) {
+			return "", fmt.Errorf("本地缓存中未找到仓库，请先点击“拉取代码”")
+		}
 		return "", err
 	}
-
-	cmd := exec.CommandContext(ctx, "git", "clone", "--bare", repoURL, target)
-	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
-	if err := cmd.Run(); err != nil {
-		return "", fmt.Errorf("clone 失败: %w: %s", err, stderr.String())
-	}
 	return target, nil
+}
+
+func (m *Manager) PrepareRemoteRepo(ctx context.Context, repoURLs []string, reposDir, repoIdentity string) (string, string, error) {
+	repoIdentity = strings.TrimSpace(repoIdentity)
+	if repoIdentity == "" {
+		return "", "", errors.New("仓库标识为空")
+	}
+	candidates := compactStrings(repoURLs)
+	if len(candidates) == 0 {
+		return "", "", errors.New("仓库地址为空")
+	}
+
+	target := filepath.Join(reposDir, repoKey(repoIdentity)+".git")
+	if _, err := os.Stat(target); err == nil {
+		return target, "", nil
+	}
+	if err := os.MkdirAll(reposDir, 0o755); err != nil {
+		return "", "", err
+	}
+
+	failures := []string{}
+	for _, repoURL := range candidates {
+		_ = os.RemoveAll(target)
+		cmd := commandContext(ctx, "git", "clone", "--bare", repoURL, target)
+		var stderr bytes.Buffer
+		cmd.Stderr = &stderr
+		if err := cmd.Run(); err != nil {
+			failures = append(failures, fmt.Sprintf("%s => %v: %s", repoURL, err, strings.TrimSpace(stderr.String())))
+			continue
+		}
+		return target, repoURL, nil
+	}
+
+	_ = os.RemoveAll(target)
+	return "", "", fmt.Errorf("clone 失败，已尝试所有仓库地址: %s", strings.Join(uniqueStrings(failures), " | "))
 }
 
 func (m *Manager) ResolveGitDir(ctx context.Context, repoPath string) (string, error) {
@@ -60,6 +94,49 @@ func (m *Manager) FetchAll(ctx context.Context, gitDir string) error {
 	return err
 }
 
+func (m *Manager) FetchWithFallback(ctx context.Context, gitDir string, repoURLs []string) (string, error) {
+	currentURL, _ := m.currentOriginURL(ctx, gitDir)
+	candidates := compactStrings(append([]string{currentURL}, repoURLs...))
+	if len(candidates) == 0 {
+		if err := m.FetchAll(ctx, gitDir); err != nil {
+			return "", err
+		}
+		return "", nil
+	}
+
+	var failures []string
+	for _, candidate := range candidates {
+		if strings.TrimSpace(candidate) == "" {
+			continue
+		}
+		if currentURL != candidate {
+			if _, err := m.runGitDir(ctx, gitDir, "remote", "set-url", "origin", candidate); err != nil {
+				failures = append(failures, err.Error())
+				continue
+			}
+			currentURL = candidate
+		}
+		if err := m.FetchAll(ctx, gitDir); err == nil {
+			return candidate, nil
+		} else {
+			failures = append(failures, err.Error())
+		}
+	}
+
+	if len(failures) == 0 {
+		return "", errors.New("fetch 失败")
+	}
+	return "", fmt.Errorf("fetch 失败，已尝试所有仓库地址: %s", strings.Join(uniqueStrings(failures), " | "))
+}
+
+func (m *Manager) currentOriginURL(ctx context.Context, gitDir string) (string, error) {
+	out, err := m.runGitDir(ctx, gitDir, "remote", "get-url", "origin")
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(out), nil
+}
+
 func (m *Manager) ResolveCommit(ctx context.Context, gitDir, ref string) (string, error) {
 	for _, candidate := range candidateRefs(ref) {
 		out, err := m.runGitDir(ctx, gitDir, "rev-parse", candidate+"^{commit}")
@@ -68,6 +145,14 @@ func (m *Manager) ResolveCommit(ctx context.Context, gitDir, ref string) (string
 		}
 	}
 	return "", fmt.Errorf("无法解析引用: %s", ref)
+}
+
+func (m *Manager) BranchExists(ctx context.Context, gitDir, ref string) error {
+	_, err := m.ResolveCommit(ctx, gitDir, ref)
+	if err != nil {
+		return fmt.Errorf("分支不存在: %s", ref)
+	}
+	return nil
 }
 
 func (m *Manager) MergeBase(ctx context.Context, gitDir, targetRef, sourceRef string) (string, error) {
@@ -183,9 +268,49 @@ func (m *Manager) BuildDiff(ctx context.Context, worktreePath, mergeBase, source
 	}, nil
 }
 
+func (m *Manager) ListBranchesByActivity(ctx context.Context, gitDir string) ([]string, error) {
+	branches := []string{}
+	seen := map[string]struct{}{}
+
+	collect := func(scope, prefix string) {
+		out, err := m.runGitDir(ctx, gitDir, "for-each-ref", "--sort=-committerdate", "--format=%(refname:short)", scope)
+		if err != nil {
+			return
+		}
+		for _, branch := range splitNonEmptyLines(out) {
+			branch = normalizeBranchName(branch, prefix)
+			if branch == "" {
+				continue
+			}
+			if _, ok := seen[branch]; ok {
+				continue
+			}
+			seen[branch] = struct{}{}
+			branches = append(branches, branch)
+		}
+	}
+
+	collect("refs/remotes/origin", "origin/")
+	collect("refs/heads", "")
+	if len(branches) == 0 {
+		return nil, errors.New("未找到任何分支")
+	}
+	return branches, nil
+}
+
+func (m *Manager) SuggestBranches(ctx context.Context, gitDir string) (string, string, []string, error) {
+	branches, err := m.ListBranchesByActivity(ctx, gitDir)
+	if err != nil {
+		return "", "", nil, err
+	}
+	target := pickTargetBranch(branches)
+	source := pickSourceBranch(branches, target)
+	return source, target, branches, nil
+}
+
 func (m *Manager) run(ctx context.Context, dir string, args ...string) (string, error) {
 	cmdArgs := append([]string{"-C", dir}, args...)
-	cmd := exec.CommandContext(ctx, "git", cmdArgs...)
+	cmd := commandContext(ctx, "git", cmdArgs...)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
@@ -197,7 +322,7 @@ func (m *Manager) run(ctx context.Context, dir string, args ...string) (string, 
 
 func (m *Manager) runGitDir(ctx context.Context, gitDir string, args ...string) (string, error) {
 	cmdArgs := append([]string{"--git-dir", gitDir}, args...)
-	cmd := exec.CommandContext(ctx, "git", cmdArgs...)
+	cmd := commandContext(ctx, "git", cmdArgs...)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
@@ -275,6 +400,71 @@ func detectLanguage(path string) string {
 	}
 }
 
+func normalizeBranchName(branch, prefix string) string {
+	branch = strings.TrimSpace(branch)
+	if branch == "" || branch == "HEAD" || branch == "origin/HEAD" {
+		return ""
+	}
+	if prefix != "" && strings.HasPrefix(branch, prefix) {
+		branch = strings.TrimPrefix(branch, prefix)
+	}
+	if branch == "HEAD" {
+		return ""
+	}
+	return branch
+}
+
+func pickTargetBranch(branches []string) string {
+	set := map[string]struct{}{}
+	for _, branch := range branches {
+		set[strings.TrimSpace(branch)] = struct{}{}
+	}
+	for _, candidate := range []string{"master", "main", "develop"} {
+		if _, ok := set[candidate]; ok {
+			return candidate
+		}
+	}
+	if len(branches) > 0 {
+		return branches[0]
+	}
+	return ""
+}
+
+func pickSourceBranch(branches []string, target string) string {
+	skip := map[string]struct{}{
+		strings.TrimSpace(target): {},
+		"master":                  {},
+		"main":                    {},
+		"develop":                 {},
+	}
+	for _, branch := range branches {
+		if _, ok := skip[strings.TrimSpace(branch)]; ok {
+			continue
+		}
+		return branch
+	}
+	for _, branch := range branches {
+		if strings.TrimSpace(branch) != strings.TrimSpace(target) {
+			return branch
+		}
+	}
+	if len(branches) > 0 {
+		return branches[0]
+	}
+	return ""
+}
+
+func compactStrings(items []string) []string {
+	out := make([]string, 0, len(items))
+	for _, item := range items {
+		item = strings.TrimSpace(item)
+		if item != "" {
+			out = append(out, item)
+		}
+	}
+	return uniqueStrings(out)
+}
+
 func uniqueStrings(items []string) []string {
 	seen := map[string]struct{}{}
 	out := make([]string, 0, len(items))
@@ -291,4 +481,10 @@ func uniqueStrings(items []string) []string {
 func repoKey(value string) string {
 	sum := sha1.Sum([]byte(value))
 	return hex.EncodeToString(sum[:])
+}
+
+func sortedStrings(items []string) []string {
+	out := append([]string(nil), items...)
+	sort.Strings(out)
+	return out
 }

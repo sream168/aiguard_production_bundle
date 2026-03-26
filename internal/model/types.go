@@ -7,6 +7,7 @@ import (
 
 type AuditScope struct {
 	Provider     string `json:"provider"`
+	RepoIdentity string `json:"repoIdentity,omitempty"`
 	RepoURL      string `json:"repoUrl"`
 	SourceBranch string `json:"sourceBranch"`
 	TargetBranch string `json:"targetBranch"`

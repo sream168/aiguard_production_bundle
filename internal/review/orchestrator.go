@@ -29,6 +29,20 @@ type Orchestrator struct {
 	locker *workspace.Locker
 }
 
+type PreparedRepo struct {
+	Provider     string
+	RepoIdentity string
+	RepoURL      string
+	RepoURLs     []string
+	GitDir       string
+	RepoKey      string
+}
+
+type RepoPrepareMode struct {
+	CloneIfMissing bool
+	Fetch          bool
+}
+
 type llmIssueResponse struct {
 	Issues []model.Finding `json:"issues"`
 }
@@ -59,54 +73,23 @@ func (o *Orchestrator) Run(ctx context.Context, taskID string, req uiapi.StartRe
 		return uiapi.ReviewDoneEvent{}, fmt.Errorf("源分支和目标分支不能为空")
 	}
 
-	repoInfo := provider.Parse(req.MRURL)
-	providerName := repoInfo.Provider
-	if providerName == "" {
-		providerName = "generic"
-	}
-	repoURL := firstNonEmpty(strings.TrimSpace(req.RepoURL), strings.TrimSpace(repoInfo.RepoURL))
-	repoIdentity := firstNonEmpty(repoURL, strings.TrimSpace(req.LocalRepoPath))
-	if repoIdentity == "" {
-		return uiapi.ReviewDoneEvent{}, fmt.Errorf("无法识别仓库地址，请手动填写仓库地址或本地仓库路径")
-	}
-
 	emitProgress(emit, taskID, "初始化", 5, "准备工作区与任务上下文", model.Summary{})
 
-	var gitDir string
-	var worktreePath string
-	var repoKey string
-	var mergeBase string
-	var sourceCommit string
-
-	unlock := o.locker.Acquire(workspace.RepoKey(repoIdentity))
-	defer unlock()
-
-	if strings.TrimSpace(req.LocalRepoPath) != "" {
-		emitProgress(emit, taskID, "同步代码", 15, "使用本地仓库模式准备 worktree", model.Summary{})
-		gitDir, err = o.git.ResolveGitDir(ctx, req.LocalRepoPath)
-		if err != nil {
-			return uiapi.ReviewDoneEvent{}, err
-		}
-		repoKey = workspace.RepoKey(req.LocalRepoPath)
-		_ = o.git.FetchAll(ctx, gitDir)
-	} else {
-		emitProgress(emit, taskID, "同步代码", 15, "拉取/更新仓库镜像", model.Summary{})
-		gitDir, err = o.git.EnsureBareRepo(ctx, repoURL, layout.Repos)
-		if err != nil {
-			return uiapi.ReviewDoneEvent{}, err
-		}
-		repoKey = workspace.RepoKey(repoURL)
-		if err := o.git.FetchAll(ctx, gitDir); err != nil {
-			return uiapi.ReviewDoneEvent{}, err
-		}
-	}
-
-	worktreePath, sourceCommit, err = o.git.PrepareWorktree(ctx, gitDir, req.SourceBranch, layout.Worktrees, repoKey)
+	prepared, err := o.PrepareRepository(ctx, req, cfg, layout, RepoPrepareMode{CloneIfMissing: false, Fetch: false})
 	if err != nil {
 		return uiapi.ReviewDoneEvent{}, err
 	}
 
-	mergeBase, err = o.git.MergeBase(ctx, gitDir, req.TargetBranch, req.SourceBranch)
+	unlock := o.locker.Acquire(prepared.RepoKey)
+	defer unlock()
+
+	emitProgress(emit, taskID, "同步代码", 15, "准备本地 worktree", model.Summary{})
+	worktreePath, sourceCommit, err := o.git.PrepareWorktree(ctx, prepared.GitDir, req.SourceBranch, layout.Worktrees, prepared.RepoKey)
+	if err != nil {
+		return uiapi.ReviewDoneEvent{}, err
+	}
+
+	mergeBase, err := o.git.MergeBase(ctx, prepared.GitDir, req.TargetBranch, req.SourceBranch)
 	if err != nil {
 		return uiapi.ReviewDoneEvent{}, err
 	}
@@ -148,7 +131,7 @@ func (o *Orchestrator) Run(ctx context.Context, taskID string, req uiapi.StartRe
 	summary := findings.BuildSummary(allFindings)
 	health := findings.BuildHealth(allFindings)
 
-	previous, _ := history.FindLatest(layout.Reports, repoIdentity, req.SourceBranch, req.TargetBranch, taskID)
+	previous, _ := history.FindLatest(layout.Reports, prepared.RepoIdentity, prepared.RepoURL, req.SourceBranch, req.TargetBranch, taskID)
 	comparison := history.Compare(previous, allFindings)
 	if previous != nil {
 		notes = append(notes, fmt.Sprintf("已对比上一份同分支报告：新增 %d、已修复 %d、仍存在 %d。",
@@ -160,8 +143,9 @@ func (o *Orchestrator) Run(ctx context.Context, taskID string, req uiapi.StartRe
 		Title:     fmt.Sprintf("AI代码监视报告 - %s -> %s", req.SourceBranch, req.TargetBranch),
 		CreatedAt: time.Now().Format(time.RFC3339),
 		Scope: model.AuditScope{
-			Provider:     providerName,
-			RepoURL:      repoIdentity,
+			Provider:     prepared.Provider,
+			RepoIdentity: prepared.RepoIdentity,
+			RepoURL:      prepared.RepoURL,
 			SourceBranch: req.SourceBranch,
 			TargetBranch: req.TargetBranch,
 			MergeBase:    mergeBase,
@@ -198,6 +182,99 @@ func (o *Orchestrator) Run(ctx context.Context, taskID string, req uiapi.StartRe
 		JSONPath:     paths.JSON,
 		Report:       rpt,
 	}, nil
+}
+
+func (o *Orchestrator) PrepareRepository(
+	ctx context.Context,
+	req uiapi.StartReviewRequest,
+	cfg config.Config,
+	layout workspace.Layout,
+	mode RepoPrepareMode,
+) (PreparedRepo, error) {
+	repoInfo := provider.Parse(req.MRURL, cfg.Git)
+	providerName := repoInfo.Provider
+	if providerName == "" {
+		providerName = "generic"
+	}
+
+	manualRepoURL := strings.TrimSpace(req.RepoURL)
+	repoURLs := uniqueStrings(compactStrings(append([]string{manualRepoURL}, repoInfo.RepoURLs...)))
+	repoURL := firstNonEmpty(manualRepoURL, repoInfo.RepoURL)
+
+	repoIdentity := strings.TrimSpace(req.LocalRepoPath)
+	if repoIdentity == "" && strings.TrimSpace(repoInfo.Path) != "" {
+		repoIdentity = providerName + ":" + strings.TrimSpace(repoInfo.Path)
+	}
+	if repoIdentity == "" {
+		repoIdentity = repoURL
+	}
+	if repoIdentity == "" {
+		return PreparedRepo{}, fmt.Errorf("无法识别仓库地址，请手动填写仓库地址或本地仓库路径")
+	}
+
+	prepared := PreparedRepo{
+		Provider:     providerName,
+		RepoIdentity: repoIdentity,
+		RepoURL:      firstNonEmpty(repoURL, strings.TrimSpace(req.LocalRepoPath)),
+		RepoURLs:     repoURLs,
+		RepoKey:      workspace.RepoKey(repoIdentity),
+	}
+
+	if strings.TrimSpace(req.LocalRepoPath) != "" {
+		gitDir, err := o.git.ResolveGitDir(ctx, req.LocalRepoPath)
+		if err != nil {
+			return PreparedRepo{}, err
+		}
+		prepared.GitDir = gitDir
+		prepared.RepoURL = strings.TrimSpace(req.LocalRepoPath)
+		if mode.Fetch {
+			_ = o.git.FetchAll(ctx, gitDir)
+		}
+		return prepared, nil
+	}
+
+	if len(repoURLs) == 0 {
+		return PreparedRepo{}, fmt.Errorf("无法识别仓库地址，请手动填写仓库地址或本地仓库路径")
+	}
+
+	gitDir, err := o.git.OpenCachedRepo(layout.Repos, repoIdentity)
+	if err != nil {
+		if !mode.CloneIfMissing {
+			return PreparedRepo{}, err
+		}
+		var usedURL string
+		gitDir, usedURL, err = o.git.PrepareRemoteRepo(ctx, repoURLs, layout.Repos, repoIdentity)
+		if err != nil {
+			return PreparedRepo{}, err
+		}
+		prepared.GitDir = gitDir
+		prepared.RepoURL = firstNonEmpty(usedURL, prepared.RepoURL)
+		return prepared, nil
+	}
+
+	prepared.GitDir = gitDir
+	if mode.Fetch {
+		usedURL, err := o.git.FetchWithFallback(ctx, gitDir, repoURLs)
+		if err != nil {
+			return PreparedRepo{}, err
+		}
+		prepared.RepoURL = firstNonEmpty(usedURL, prepared.RepoURL)
+	}
+	return prepared, nil
+}
+
+func (o *Orchestrator) SuggestBranches(ctx context.Context, gitDir string) (string, string, []string, error) {
+	return o.git.SuggestBranches(ctx, gitDir)
+}
+
+func (o *Orchestrator) ValidateBranches(ctx context.Context, gitDir, source, target string) error {
+	if err := o.git.BranchExists(ctx, gitDir, source); err != nil {
+		return err
+	}
+	if err := o.git.BranchExists(ctx, gitDir, target); err != nil {
+		return err
+	}
+	return nil
 }
 
 func (o *Orchestrator) runLLMReview(
@@ -275,9 +352,8 @@ func (o *Orchestrator) runLLMReview(
 	return results, notes
 }
 
-func (o *Orchestrator) ListHistory() ([]uiapi.HistoryItem, error) {
-	cfg := config.Default()
-	layout, err := workspace.Prepare(cfg.Review.WorkspaceDir)
+func (o *Orchestrator) ListHistory(workspaceDir string) ([]uiapi.HistoryItem, error) {
+	layout, err := workspace.Prepare(workspaceDir)
 	if err != nil {
 		return nil, err
 	}
@@ -326,11 +402,36 @@ func emitProgress(emit func(string, any), taskID, stage string, percent int, mes
 
 func firstNonEmpty(values ...string) string {
 	for _, value := range values {
-		if strings.TrimSpace(value) != "" {
-			return strings.TrimSpace(value)
+		value = strings.TrimSpace(value)
+		if value != "" {
+			return value
 		}
 	}
 	return ""
+}
+
+func compactStrings(items []string) []string {
+	out := make([]string, 0, len(items))
+	for _, item := range items {
+		item = strings.TrimSpace(item)
+		if item != "" {
+			out = append(out, item)
+		}
+	}
+	return uniqueStrings(out)
+}
+
+func uniqueStrings(items []string) []string {
+	seen := map[string]struct{}{}
+	out := make([]string, 0, len(items))
+	for _, item := range items {
+		if _, ok := seen[item]; ok {
+			continue
+		}
+		seen[item] = struct{}{}
+		out = append(out, item)
+	}
+	return out
 }
 
 func max(a, b int) int {

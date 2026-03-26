@@ -13,11 +13,11 @@ $binDir = Join-Path $WorkspaceRoot 'build\bin'
 New-Item -ItemType Directory -Force -Path $releaseDir | Out-Null
 
 if (-not (Test-Path $binDir)) {
-  throw "未找到 build/bin，请先执行构建。"
+  throw "build/bin was not found. Please build the application first."
 }
 
 $timestamp = Get-Date -Format 'yyyyMMdd-HHmmss'
 $zipPath = Join-Path $releaseDir ("AIGuard-windows-$timestamp.zip")
 if (Test-Path $zipPath) { Remove-Item $zipPath -Force }
 Compress-Archive -Path (Join-Path $binDir '*') -DestinationPath $zipPath
-Write-Host "已归档到 $zipPath" -ForegroundColor Green
+Write-Host "Archived to $zipPath" -ForegroundColor Green

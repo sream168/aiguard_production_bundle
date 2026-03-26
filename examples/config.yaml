@@ -2,6 +2,12 @@ openai:
   base_url: "http://127.0.0.1:8000/v1"
   api_key: "EMPTY"
   default_model: "Qwen/Qwen3-Coder-30B-A3B-Instruct"
+  proxy:
+    enabled: false
+    url: ""
+    http: ""
+    https: ""
+    no_proxy: ""
 
 runtime:
   request_timeout_sec: 180
@@ -29,3 +35,24 @@ rules:
     - "build/**"
     - "*.min.js"
     - "*.lock"
+
+git:
+  preferred_protocol: "ssh"
+  gitlab:
+    ssh:
+      host: ""
+      port: ""
+      user: "git"
+    https:
+      scheme: "https"
+      host: ""
+      port: ""
+  github:
+    ssh:
+      host: ""
+      port: ""
+      user: "git"
+    https:
+      scheme: "https"
+      host: ""
+      port: ""

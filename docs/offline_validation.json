@@ -1,0 +1,10 @@
+{
+  "scripts_no_chinese": true,
+  "script_failures": {},
+  "config_missing_tokens": [],
+  "gitlab_regex_groups": {
+    "host": "gitlab.example.com",
+    "path": "group/subgroup/project",
+    "mr_id": "123"
+  }
+}

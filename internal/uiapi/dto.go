@@ -12,6 +12,33 @@ type StartReviewRequest struct {
 	WorkspaceDir  string `json:"workspaceDir"`
 }
 
+type RuntimeContextRequest struct {
+	ConfigPath   string `json:"configPath"`
+	WorkspaceDir string `json:"workspaceDir"`
+}
+
+type PrepareRepositoryResponse struct {
+	RepoURL           string   `json:"repoUrl"`
+	SourceBranch      string   `json:"sourceBranch"`
+	TargetBranch      string   `json:"targetBranch"`
+	AvailableBranches []string `json:"availableBranches"`
+	LogPath           string   `json:"logPath"`
+	Message           string   `json:"message"`
+}
+
+type LogState struct {
+	LogPath   string `json:"logPath"`
+	Content   string `json:"content"`
+	UpdatedAt string `json:"updatedAt"`
+}
+
+type CacheClearResult struct {
+	WorkspaceDir string   `json:"workspaceDir"`
+	LogPath      string   `json:"logPath"`
+	Removed      []string `json:"removed"`
+	Message      string   `json:"message"`
+}
+
 type ProgressEvent struct {
 	TaskID  string `json:"taskId"`
 	Stage   string `json:"stage"`

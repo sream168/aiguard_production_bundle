@@ -42,7 +42,7 @@ func List(reportsRoot string) ([]model.Report, error) {
 	return reports, nil
 }
 
-func FindLatest(reportsRoot, repoURL, source, target, exceptTaskID string) (*model.Report, error) {
+func FindLatest(reportsRoot, repoIdentity, repoURL, source, target, exceptTaskID string) (*model.Report, error) {
 	reports, err := List(reportsRoot)
 	if err != nil {
 		return nil, err
@@ -51,7 +51,12 @@ func FindLatest(reportsRoot, repoURL, source, target, exceptTaskID string) (*mod
 		if rpt.TaskID == exceptTaskID {
 			continue
 		}
-		if strings.TrimSpace(repoURL) != "" && strings.TrimSpace(rpt.Scope.RepoURL) != strings.TrimSpace(repoURL) {
+		if strings.TrimSpace(repoIdentity) != "" {
+			currentIdentity := firstNonEmpty(strings.TrimSpace(rpt.Scope.RepoIdentity), strings.TrimSpace(rpt.Scope.RepoURL))
+			if currentIdentity != strings.TrimSpace(repoIdentity) {
+				continue
+			}
+		} else if strings.TrimSpace(repoURL) != "" && strings.TrimSpace(rpt.Scope.RepoURL) != strings.TrimSpace(repoURL) {
 			continue
 		}
 		if strings.TrimSpace(source) != "" && strings.TrimSpace(rpt.Scope.SourceBranch) != strings.TrimSpace(source) {
@@ -119,4 +124,14 @@ func unique(items []string) []string {
 		out = append(out, item)
 	}
 	return out
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value != "" {
+			return value
+		}
+	}
+	return ""
 }

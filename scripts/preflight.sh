@@ -16,9 +16,9 @@ check_cmd npm
 check_cmd wails
 
 if ! xcode-select -p >/dev/null 2>&1; then
-  echo "[WARN] Xcode Command Line Tools 未安装，请先执行: xcode-select --install" >&2
+  echo "[WARN] Xcode Command Line Tools are not installed. Run: xcode-select --install" >&2
 else
-  echo "[ OK ] Xcode Command Line Tools 已安装"
+  echo "[ OK ] Xcode Command Line Tools detected"
 fi
 
 echo

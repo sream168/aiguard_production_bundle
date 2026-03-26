@@ -8,6 +8,33 @@ export interface StartReviewRequest {
   workspaceDir: string
 }
 
+export interface RuntimeContextRequest {
+  configPath: string
+  workspaceDir: string
+}
+
+export interface PrepareRepositoryResponse {
+  repoUrl: string
+  sourceBranch: string
+  targetBranch: string
+  availableBranches: string[]
+  logPath: string
+  message: string
+}
+
+export interface LogState {
+  logPath: string
+  content: string
+  updatedAt: string
+}
+
+export interface CacheClearResult {
+  workspaceDir: string
+  logPath: string
+  removed: string[]
+  message: string
+}
+
 export interface ProgressEvent {
   taskId: string
   stage: string
