@@ -26,6 +26,14 @@ type PrepareRepositoryResponse struct {
 	Message           string   `json:"message"`
 }
 
+type RepositorySuggestion struct {
+	RepoURL       string   `json:"repoUrl"`
+	Candidates    []string `json:"candidates"`
+	ResolvedByMR  bool     `json:"resolvedByMr"`
+	ManualRepoURL string   `json:"manualRepoUrl"`
+	Message       string   `json:"message"`
+}
+
 type LogState struct {
 	LogPath   string `json:"logPath"`
 	Content   string `json:"content"`
@@ -59,13 +67,27 @@ type ReviewDoneEvent struct {
 }
 
 type HistoryItem struct {
-	TaskID      string        `json:"taskId"`
-	Title       string        `json:"title"`
-	RepoURL     string        `json:"repoUrl"`
-	SourceRef   string        `json:"sourceRef"`
-	TargetRef   string        `json:"targetRef"`
-	CreatedAt   string        `json:"createdAt"`
-	ReportDir   string        `json:"reportDir"`
-	TotalIssues int           `json:"totalIssues"`
-	Summary     model.Summary `json:"summary"`
+	TaskID       string        `json:"taskId"`
+	Title        string        `json:"title"`
+	RepoURL      string        `json:"repoUrl"`
+	SourceRef    string        `json:"sourceRef"`
+	TargetRef    string        `json:"targetRef"`
+	CreatedAt    string        `json:"createdAt"`
+	ReportDir    string        `json:"reportDir"`
+	HTMLPath     string        `json:"htmlPath"`
+	MarkdownPath string        `json:"markdownPath"`
+	JSONPath     string        `json:"jsonPath"`
+	TotalIssues  int           `json:"totalIssues"`
+	Summary      model.Summary `json:"summary"`
+}
+
+type OpenReportRequest struct {
+	HTMLPath  string `json:"htmlPath"`
+	ReportDir string `json:"reportDir"`
+}
+
+type OpenPathResult struct {
+	Path    string `json:"path"`
+	Mode    string `json:"mode"`
+	Message string `json:"message"`
 }

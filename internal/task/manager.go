@@ -10,12 +10,20 @@ import (
 type TaskHandle struct {
 	Cancel func()
 	Req    uiapi.StartReviewRequest
+	State  TaskState
 }
 
 type Manager struct {
 	mu    sync.Mutex
 	tasks map[string]*TaskHandle
 }
+
+type TaskState string
+
+const (
+	TaskStateRunning    TaskState = "running"
+	TaskStateCancelling TaskState = "cancelling"
+)
 
 func NewManager() *Manager {
 	return &Manager{
@@ -29,6 +37,7 @@ func (m *Manager) Add(taskID string, cancel func(), req uiapi.StartReviewRequest
 	m.tasks[taskID] = &TaskHandle{
 		Cancel: cancel,
 		Req:    req,
+		State:  TaskStateRunning,
 	}
 }
 
@@ -46,9 +55,12 @@ func (m *Manager) Cancel(taskID string) error {
 	if !ok {
 		return errors.New("任务不存在或已结束")
 	}
+	if handle.State == TaskStateCancelling {
+		return nil
+	}
 
+	handle.State = TaskStateCancelling
 	handle.Cancel()
-	delete(m.tasks, taskID)
 	return nil
 }
 

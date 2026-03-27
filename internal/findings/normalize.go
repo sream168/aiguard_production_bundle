@@ -42,6 +42,9 @@ func Normalize(items []model.Finding) []model.Finding {
 		if len(item.Recommendation) > len(existing.Recommendation) {
 			existing.Recommendation = item.Recommendation
 		}
+		if len(item.RecommendationCode) > len(existing.RecommendationCode) {
+			existing.RecommendationCode = item.RecommendationCode
+		}
 		merged[key] = existing
 	}
 
@@ -129,6 +132,7 @@ func normalizeFinding(item model.Finding) model.Finding {
 	item.Impact = strings.TrimSpace(item.Impact)
 	item.Evidence = strings.TrimSpace(item.Evidence)
 	item.Recommendation = strings.TrimSpace(item.Recommendation)
+	item.RecommendationCode = strings.TrimSpace(item.RecommendationCode)
 	item.File = strings.TrimSpace(item.File)
 	item.Category = normalizeCategory(item.Category)
 	item.Severity = normalizeSeverity(item.Severity)

@@ -87,18 +87,19 @@ type ReviewPack struct {
 }
 
 type Finding struct {
-	ID             string `json:"id"`
-	Title          string `json:"title"`
-	Severity       string `json:"severity"`
-	Category       string `json:"category"`
-	Confidence     string `json:"confidence"`
-	File           string `json:"file"`
-	LineStart      int    `json:"lineStart"`
-	LineEnd        int    `json:"lineEnd"`
-	Description    string `json:"description"`
-	Impact         string `json:"impact"`
-	Evidence       string `json:"evidence"`
-	Recommendation string `json:"recommendation"`
+	ID                 string `json:"id"`
+	Title              string `json:"title"`
+	Severity           string `json:"severity"`
+	Category           string `json:"category"`
+	Confidence         string `json:"confidence"`
+	File               string `json:"file"`
+	LineStart          int    `json:"lineStart"`
+	LineEnd            int    `json:"lineEnd"`
+	Description        string `json:"description"`
+	Impact             string `json:"impact"`
+	Evidence           string `json:"evidence"`
+	Recommendation     string `json:"recommendation"`
+	RecommendationCode string `json:"recommendationCode,omitempty"`
 }
 
 func (f Finding) Fingerprint() string {
@@ -138,17 +139,17 @@ type ComparisonResult struct {
 }
 
 type Report struct {
-	TaskID        string           `json:"taskId"`
-	Title         string           `json:"title"`
-	CreatedAt     string           `json:"createdAt"`
-	Scope         AuditScope       `json:"scope"`
-	ProjectBrief  ProjectBrief     `json:"projectBrief"`
-	Findings      []Finding        `json:"findings"`
-	Summary       Summary          `json:"summary"`
-	Health        HealthScore      `json:"health"`
-	Notes         []string         `json:"notes"`
-	Comparison    ComparisonResult `json:"comparison"`
-	SkippedFiles  []string         `json:"skippedFiles,omitempty"`
-	ArtifactsHint []string         `json:"artifactsHint,omitempty"`
-	CodeBrowseBaseURL string       `json:"codeBrowseBaseUrl,omitempty"`
+	TaskID            string           `json:"taskId"`
+	Title             string           `json:"title"`
+	CreatedAt         string           `json:"createdAt"`
+	Scope             AuditScope       `json:"scope"`
+	ProjectBrief      ProjectBrief     `json:"projectBrief"`
+	Findings          []Finding        `json:"findings"`
+	Summary           Summary          `json:"summary"`
+	Health            HealthScore      `json:"health"`
+	Notes             []string         `json:"notes"`
+	Comparison        ComparisonResult `json:"comparison"`
+	SkippedFiles      []string         `json:"skippedFiles,omitempty"`
+	ArtifactsHint     []string         `json:"artifactsHint,omitempty"`
+	CodeBrowseBaseURL string           `json:"codeBrowseBaseUrl,omitempty"`
 }

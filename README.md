@@ -6,10 +6,11 @@
 
 这次增强包在首版工程骨架基础上，补了更接近生产落地的交付内容：
 
-- 更完整的 Windows / macOS 打包执行文件指导文档
+- 更完整的 Windows / macOS / Linux 打包执行文件指导文档
 - 本地预检脚本（检查 Go、Node、Wails、Git、WebView2 / Xcode CLT 等依赖）
 - Windows 一键构建脚本（可选 NSIS 安装包、可选签名）
 - macOS 一键构建脚本（可选 universal 包、可选签名与 notarization 模板）
+- Linux 一键构建脚本（兼容 Ubuntu 24.04 的 `webkit2_41` 路径）
 - GitHub Actions 跨平台发布工作流样例
 - macOS 签名模板：`Info.plist`、`entitlements.plist`、`gon-sign.sample.json`
 - 生产环境配置样例 `examples/config.production.yaml`
@@ -42,7 +43,7 @@ aiguard/
 
 ## 文档入口
 
-- `docs/BUILD_EXECUTABLE_GUIDE.md`：Windows / macOS 打包执行文件完整指南
+- `docs/BUILD_EXECUTABLE_GUIDE.md`：Windows / macOS / Linux 打包执行文件完整指南
 - `docs/CI_RELEASE_GUIDE.md`：CI 发布与签名思路
 - `docs/RELEASE_CHECKLIST.md`：发版检查清单
 - `docs/PRODUCTION_ENHANCEMENTS.md`：本增强包增加了哪些内容
@@ -56,6 +57,7 @@ aiguard/
 - 可访问的 OpenAI-compatible 模型服务
 - Windows：建议确认 WebView2 Runtime 已安装
 - macOS：先安装 Xcode Command Line Tools
+- Linux（如 Ubuntu 24.04+）：建议确认 `libwebkit2gtk-4.1-dev` / `libgtk-3-dev` / `pkg-config` 已安装
 
 ## 快速开始
 
@@ -98,8 +100,11 @@ wails build
 # Windows PowerShell
 ./scripts/build_windows.ps1
 
-# macOS / Linux Shell
+# macOS Shell
 ./scripts/build_macos.sh
+
+# Linux Shell
+./scripts/build_linux.sh
 ```
 
 ## 构建脚本说明
@@ -115,6 +120,12 @@ wails build
 - `scripts/preflight.sh`：依赖检查
 - `scripts/build_macos.sh`：构建 `.app`，支持 `darwin/universal`
 - `scripts/package_release.sh`：把 `.app` 归档到 `release/`
+
+### Linux
+
+- `scripts/preflight.sh`：依赖检查
+- `scripts/build_linux.sh`：构建 `linux/amd64` 二进制；若检测到 `webkit2gtk-4.1`，自动追加 `webkit2_41` tag
+- `scripts/package_release_linux.sh`：把 Linux 二进制归档到 `release/`
 
 ## 环境变量覆盖
 
@@ -169,4 +180,5 @@ wails build
 
 - 这个包已经把工程骨架、打包脚本、打包文档、CI 样例和签名模板都放齐了。
 - 由于当前交付物是源码增强包，不包含已经签名好的最终二进制；你需要在自己的 Windows/macOS 机器上按文档执行打包。
+- Linux/Ubuntu 24.04+ 如使用 Wails 2.11.0，本仓库脚本会自动选择 `webkit2_41` 构建 tag。
 - 当前环境未为你实际下载 Go/Wails 前端依赖并完成整机出包，因此首次本地构建时建议先执行预检脚本。

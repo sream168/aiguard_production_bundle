@@ -2,7 +2,9 @@ import type {
   CacheClearResult,
   HistoryItem,
   LogState,
+  OpenPathResult,
   PrepareRepositoryResponse,
+  RepositorySuggestion,
   RuntimeContextRequest,
   StartReviewRequest
 } from './types'
@@ -17,6 +19,19 @@ declare global {
 }
 
 export const backend = {
+  async suggestRepository(payload: StartReviewRequest): Promise<RepositorySuggestion> {
+    if (window.go?.main?.App?.SuggestRepository) {
+      return await window.go.main.App.SuggestRepository(payload)
+    }
+    return {
+      repoUrl: payload.repoUrl,
+      candidates: payload.repoUrl ? [payload.repoUrl] : [],
+      resolvedByMr: false,
+      manualRepoUrl: payload.repoUrl,
+      message: ''
+    }
+  },
+
   async pullCode(payload: StartReviewRequest): Promise<PrepareRepositoryResponse> {
     if (window.go?.main?.App?.PullCode) {
       return await window.go.main.App.PullCode(payload)
@@ -71,6 +86,28 @@ export const backend = {
       logPath: `${payload.workspaceDir || './workspace'}/logs/aiguard.log`,
       removed: [],
       message: 'Mock cache clear completed.'
+    }
+  },
+
+  async openReport(payload: { htmlPath: string; reportDir: string }): Promise<OpenPathResult> {
+    if (window.go?.main?.App?.OpenReport) {
+      return await window.go.main.App.OpenReport(payload)
+    }
+    return {
+      path: payload.htmlPath || payload.reportDir,
+      mode: payload.htmlPath ? 'html' : 'directory',
+      message: 'Mock report open completed.'
+    }
+  },
+
+  async openReportDirectory(payload: { reportDir: string }): Promise<OpenPathResult> {
+    if (window.go?.main?.App?.OpenReportDirectory) {
+      return await window.go.main.App.OpenReportDirectory(payload)
+    }
+    return {
+      path: payload.reportDir,
+      mode: 'directory',
+      message: 'Mock directory open completed.'
     }
   },
 

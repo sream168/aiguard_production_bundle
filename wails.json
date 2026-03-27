@@ -7,10 +7,10 @@
   "frontend:dev:watcher": "npm run dev",
   "frontend:dev:url": "http://localhost:5173",
   "Info": {
-    "companyName": "Your Company",
+    "companyName": "AIGuard Team",
     "productName": "AIGuard",
     "productVersion": "0.2.0",
-    "copyright": "Copyright (c) Your Company",
-    "comments": "Built using Wails"
+    "copyright": "Copyright (c) AIGuard Team",
+    "comments": "Local AI code review desktop app"
   }
 }

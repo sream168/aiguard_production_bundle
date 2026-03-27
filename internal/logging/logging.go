@@ -2,6 +2,7 @@ package logging
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -10,6 +11,7 @@ import (
 )
 
 var fileLocks sync.Map
+var maxLogSizeBytes int64 = 1 << 20
 
 func ResolvePath(logsDir string) string {
 	return filepath.Join(logsDir, "aiguard.log")
@@ -38,12 +40,34 @@ func ReadTail(path string, maxBytes int) (string, error) {
 	if err := EnsureFile(path); err != nil {
 		return "", err
 	}
-	data, err := os.ReadFile(path)
+	file, err := os.Open(path)
 	if err != nil {
 		return "", err
 	}
+	defer file.Close()
+
+	stat, err := file.Stat()
+	if err != nil {
+		return "", err
+	}
+
+	var data []byte
+	if maxBytes > 0 && stat.Size() > int64(maxBytes) {
+		if _, err := file.Seek(-int64(maxBytes), io.SeekEnd); err != nil {
+			return "", err
+		}
+		data, err = io.ReadAll(file)
+	} else {
+		data, err = io.ReadAll(file)
+	}
+	if err != nil {
+		return "", err
+	}
+
 	if maxBytes > 0 && len(data) > maxBytes {
 		data = data[len(data)-maxBytes:]
+	}
+	if maxBytes > 0 {
 		if idx := strings.IndexByte(string(data), '\n'); idx >= 0 && idx < len(data)-1 {
 			data = data[idx+1:]
 		}
@@ -59,7 +83,10 @@ func appendLine(path, level, message string) error {
 	mu.Lock()
 	defer mu.Unlock()
 
-	file, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0o644)
+	if err := rotateIfNeeded(path); err != nil {
+		return err
+	}
+	file, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
 	if err != nil {
 		return err
 	}
@@ -73,4 +100,23 @@ func appendLine(path, level, message string) error {
 func fileLock(path string) *sync.Mutex {
 	lock, _ := fileLocks.LoadOrStore(path, &sync.Mutex{})
 	return lock.(*sync.Mutex)
+}
+
+func rotateIfNeeded(path string) error {
+	if maxLogSizeBytes <= 0 {
+		return nil
+	}
+	stat, err := os.Stat(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	if stat.Size() < maxLogSizeBytes {
+		return nil
+	}
+	backup := path + ".1"
+	_ = os.Remove(backup)
+	return os.Rename(path, backup)
 }

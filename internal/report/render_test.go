@@ -16,7 +16,7 @@ func TestSaveAll(t *testing.T) {
 		},
 	}
 
-	paths, err := SaveAll(rpt, tmpDir, &model.DiffSet{}, []model.ReviewPack{}, []model.Finding{})
+	paths, err := SaveAll(rpt, tmpDir, nil, &model.DiffSet{}, []model.ReviewPack{}, []model.Finding{})
 	if err != nil {
 		t.Fatalf("SaveAll failed: %v", err)
 	}

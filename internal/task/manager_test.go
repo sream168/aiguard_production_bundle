@@ -46,8 +46,13 @@ func TestCancel(t *testing.T) {
 	if !cancelled {
 		t.Error("cancel function not called")
 	}
+	if !m.HasRunning() {
+		t.Error("task should remain tracked until done")
+	}
+
+	m.Done("task1")
 	if m.HasRunning() {
-		t.Error("task should be removed")
+		t.Error("task should be removed after done")
 	}
 }
 

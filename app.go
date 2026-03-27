@@ -4,20 +4,24 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
+	"os/exec"
 	"path/filepath"
+	goruntime "runtime"
 	"strings"
 	"time"
 
 	"aiguard/internal/config"
 	"aiguard/internal/llm"
 	"aiguard/internal/logging"
+	"aiguard/internal/provider"
 	"aiguard/internal/review"
 	"aiguard/internal/task"
 	"aiguard/internal/uiapi"
 	"aiguard/internal/workspace"
 	"github.com/google/uuid"
-	"github.com/wailsapp/wails/v2/pkg/runtime"
+	wruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
 type App struct {
@@ -35,6 +39,33 @@ func NewApp() *App {
 
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
+}
+
+func (a *App) SuggestRepository(req uiapi.StartReviewRequest) (uiapi.RepositorySuggestion, error) {
+	cfg, _, _, _, err := a.resolveRuntime(req.ConfigPath, req.WorkspaceDir)
+	if err != nil {
+		return uiapi.RepositorySuggestion{}, err
+	}
+
+	repoInfo := provider.Parse(req.MRURL, cfg.Git)
+	manualRepoURL := strings.TrimSpace(req.RepoURL)
+	candidates := uniqueNonEmpty(append([]string{manualRepoURL}, repoInfo.RepoURLs...)...)
+	resolved := firstNonEmpty(manualRepoURL, repoInfo.RepoURL)
+
+	message := "未从 MR/PR 链接中识别到仓库地址，可手动填写。"
+	if manualRepoURL != "" {
+		message = "当前使用手动填写的仓库地址；保留可编辑。"
+	} else if repoInfo.RepoURL != "" {
+		message = "已根据 MR/PR 链接和当前 Git 配置自动推导仓库地址；仍可手动编辑覆盖。"
+	}
+
+	return uiapi.RepositorySuggestion{
+		RepoURL:       resolved,
+		Candidates:    candidates,
+		ResolvedByMR:  repoInfo.RepoURL != "",
+		ManualRepoURL: manualRepoURL,
+		Message:       message,
+	}, nil
 }
 
 func (a *App) PullCode(req uiapi.StartReviewRequest) (uiapi.PrepareRepositoryResponse, error) {
@@ -123,7 +154,7 @@ func (a *App) StartReview(req uiapi.StartReviewRequest) (string, error) {
 					logging.Infof(logPath, "Review finished successfully. report_dir=%s", done.ReportDir)
 				}
 			}
-			runtime.EventsEmit(a.ctx, name, payload)
+			wruntime.EventsEmit(a.ctx, name, payload)
 		}
 
 		logging.Infof(logPath, "Review task started. task_id=%s", taskID)
@@ -194,15 +225,62 @@ func (a *App) ClearCache(req uiapi.RuntimeContextRequest) (uiapi.CacheClearResul
 	}, nil
 }
 
+func (a *App) OpenReport(req uiapi.OpenReportRequest) (uiapi.OpenPathResult, error) {
+	htmlPath := strings.TrimSpace(req.HTMLPath)
+	if htmlPath != "" {
+		htmlPath = filepath.Clean(htmlPath)
+		if stat, err := os.Stat(htmlPath); err == nil && !stat.IsDir() {
+			if err := openLocalFile(htmlPath); err != nil {
+				return uiapi.OpenPathResult{}, err
+			}
+			return uiapi.OpenPathResult{
+				Path:    htmlPath,
+				Mode:    "html",
+				Message: "已打开 HTML 报告。",
+			}, nil
+		}
+	}
+
+	reportDir := strings.TrimSpace(req.ReportDir)
+	if reportDir == "" {
+		return uiapi.OpenPathResult{}, errors.New("报告目录不存在，无法打开报告")
+	}
+	return a.OpenReportDirectory(uiapi.OpenReportRequest{ReportDir: reportDir})
+}
+
+func (a *App) OpenReportDirectory(req uiapi.OpenReportRequest) (uiapi.OpenPathResult, error) {
+	reportDir := strings.TrimSpace(req.ReportDir)
+	if reportDir == "" {
+		return uiapi.OpenPathResult{}, errors.New("报告目录为空，无法打开")
+	}
+	reportDir = filepath.Clean(reportDir)
+	stat, err := os.Stat(reportDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return uiapi.OpenPathResult{}, errors.New("报告目录不存在，可能已被清理")
+		}
+		return uiapi.OpenPathResult{}, err
+	}
+	if !stat.IsDir() {
+		return uiapi.OpenPathResult{}, errors.New("报告目录路径无效")
+	}
+	if err := openDirectory(reportDir); err != nil {
+		return uiapi.OpenPathResult{}, err
+	}
+	return uiapi.OpenPathResult{
+		Path:    reportDir,
+		Mode:    "directory",
+		Message: "已打开报告目录。",
+	}, nil
+}
+
 func (a *App) resolveRuntime(configPath, workspaceOverride string) (config.Config, workspace.Layout, string, string, error) {
 	cfg, _ := config.Load("")
 	if strings.TrimSpace(configPath) != "" {
 		cleanPath := filepath.Clean(configPath)
 		loaded, err := config.Load(cleanPath)
 		if err != nil {
-			if !os.IsNotExist(err) {
-				return cfg, workspace.Layout{}, "", "", err
-			}
+			return cfg, workspace.Layout{}, "", "", err
 		} else {
 			cfg = loaded
 		}
@@ -222,4 +300,63 @@ func (a *App) resolveRuntime(configPath, workspaceOverride string) (config.Confi
 		return cfg, layout, "", "", err
 	}
 	return cfg, layout, logPath, workspaceDir, nil
+}
+
+func uniqueNonEmpty(values ...string) []string {
+	seen := map[string]struct{}{}
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		out = append(out, value)
+	}
+	return out
+}
+
+func openLocalFile(path string) error {
+	path = filepath.Clean(path)
+	switch goruntime.GOOS {
+	case "windows":
+		return exec.Command("rundll32.exe", "url.dll,FileProtocolHandler", fileURI(path)).Start()
+	case "darwin":
+		return exec.Command("open", path).Start()
+	default:
+		return exec.Command("xdg-open", path).Start()
+	}
+}
+
+func openDirectory(path string) error {
+	path = filepath.Clean(path)
+	switch goruntime.GOOS {
+	case "windows":
+		return exec.Command("explorer.exe", path).Start()
+	case "darwin":
+		return exec.Command("open", path).Start()
+	default:
+		return exec.Command("xdg-open", path).Start()
+	}
+}
+
+func fileURI(path string) string {
+	abs := path
+	if resolved, err := filepath.Abs(path); err == nil {
+		abs = resolved
+	}
+	return (&url.URL{Scheme: "file", Path: filepath.ToSlash(abs)}).String()
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value != "" {
+			return value
+		}
+	}
+	return ""
 }

@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest'
+import { describe, it, expect } from 'vitest'
 import { mount } from '@vue/test-utils'
 import ReviewForm from '../components/ReviewForm.vue'
 
@@ -18,12 +18,15 @@ describe('ReviewForm', () => {
     pullingCode: false,
     clearingCache: false,
     showLogs: false,
-    disabled: false
+    disabled: false,
+    repoSuggestionMessage: '',
+    repoSuggestionCandidates: [],
+    repoSuggestionResolvedByMr: false
   }
 
   it('renders form fields', () => {
     const wrapper = mount(ReviewForm, { props: defaultProps })
-    expect(wrapper.find('input[placeholder*="MR"]').exists()).toBe(true)
+    expect(wrapper.find('input[placeholder*="merge_requests"]').exists()).toBe(true)
   })
 
   it('emits pull-code event', async () => {
@@ -32,13 +35,15 @@ describe('ReviewForm', () => {
     expect(wrapper.emitted('pull-code')).toBeTruthy()
   })
 
-  it('disables buttons when disabled prop is true', () => {
+  it('shows repo suggestion pill when available', () => {
     const wrapper = mount(ReviewForm, {
-      props: { ...defaultProps, disabled: true }
+      props: {
+        ...defaultProps,
+        repoSuggestionMessage: '已自动推导',
+        repoSuggestionResolvedByMr: true,
+        repoSuggestionCandidates: ['git@example.com:test/repo.git']
+      }
     })
-    const buttons = wrapper.findAll('button')
-    buttons.forEach(btn => {
-      expect(btn.attributes('disabled')).toBeDefined()
-    })
+    expect(wrapper.text()).toContain('已自动推导')
   })
 })

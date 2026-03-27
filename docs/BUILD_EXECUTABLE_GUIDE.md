@@ -1,6 +1,6 @@
 # AIGuard 打包执行文件完整指南
 
-这份文档面向 Windows 和 macOS 本地构建，目标是把当前源码打成可直接分发的桌面程序。
+这份文档面向 Windows、macOS 和 Linux 本地构建，目标是把当前源码打成可直接分发的桌面程序。
 
 ## 1. 构建目标
 
@@ -11,6 +11,10 @@
 ### macOS
 - 调试包：`AIGuard.app`
 - 发布包：签名后的 `.app`，再按团队习惯封装成 `.zip` 或 `.dmg`
+
+### Linux
+- 调试包：`AIGuard`
+- 发布包：归档后的 `AIGuard-linux-<timestamp>.tar.gz`
 
 ## 2. 必备依赖
 
@@ -31,6 +35,12 @@
 - Xcode Command Line Tools
 - 可选：gon（如果需要签名与 notarization）
 
+### Linux
+- `libgtk-3-dev`
+- `pkg-config`
+- Ubuntu 24.04+：`libwebkit2gtk-4.1-dev`
+- Ubuntu 22.04/更早：`libwebkit2gtk-4.0-dev`
+
 ## 3. 安装 Wails CLI
 
 ```bash
@@ -43,6 +53,10 @@ go install github.com/wailsapp/wails/v2/cmd/wails@latest
 wails doctor
 ```
 
+Linux / Ubuntu 24.04+ 额外说明：
+
+- `wails doctor` 仍可能提示 `libwebkit` 缺失，但只要 `pkg-config --exists webkit2gtk-4.1` 成功，就可以通过 `webkit2_41` build tag 正常构建。
+
 ## 4. 首次构建前检查
 
 ### Windows
@@ -52,6 +66,13 @@ wails doctor
 ```
 
 ### macOS
+
+```bash
+chmod +x ./scripts/*.sh
+./scripts/preflight.sh
+```
+
+### Linux
 
 ```bash
 chmod +x ./scripts/*.sh
@@ -173,7 +194,33 @@ brew install Bearer/tap/gon
 gon -log-level=info ./build/darwin/gon-sign.json
 ```
 
-## 8. 产物位置
+## 8. Linux 本地打包
+
+### 8.1 安装 Linux 依赖
+
+Ubuntu 24.04+：
+
+```bash
+sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev pkg-config
+```
+
+### 8.2 构建 Linux 二进制
+
+```bash
+./scripts/build_linux.sh
+```
+
+脚本会执行：
+
+1. 检查 Go / Node / npm / Git / Wails
+2. 检查 `webkit2gtk-4.0` 或 `webkit2gtk-4.1`
+3. 安装前端依赖并构建前端
+4. 执行 `go mod tidy`
+5. 执行 `wails doctor`
+6. 若检测到 `webkit2gtk-4.1`，自动带 `-tags webkit2_41` 构建
+7. 归档 Linux 产物到 `release/`
+
+## 9. 产物位置
 
 ### 默认 Wails 构建目录
 
@@ -187,7 +234,7 @@ build/bin/
 release/
 ```
 
-## 9. 推荐的发版流程
+## 10. 推荐的发版流程
 
 ### 团队内测版
 
@@ -205,7 +252,7 @@ release/
 6. 归档到 release 目录
 7. 产物、配置样例、文档一起上传
 
-## 10. 常见问题
+## 11. 常见问题
 
 ### Q1：`wails doctor` 提示缺少 WebView2
 在 Windows 安装 WebView2 Runtime 后重试。
@@ -226,7 +273,20 @@ go mod tidy
 ### Q5：本地模型网关不校验 API Key
 可以将 `api_key` 设成 `EMPTY`。
 
-## 11. 建议同时保留的文件
+### Q6：Ubuntu 24.04 上 `wails doctor` 还提示缺少 libwebkit
+先确认：
+
+```bash
+pkg-config --exists webkit2gtk-4.1
+```
+
+如果存在，则使用：
+
+```bash
+wails build -platform linux/amd64 -tags webkit2_41
+```
+
+## 12. 建议同时保留的文件
 
 发布给团队时，除了可执行文件，建议同时提供：
 

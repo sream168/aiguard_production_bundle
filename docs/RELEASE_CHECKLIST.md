@@ -3,10 +3,11 @@
 ## 构建前
 
 - [ ] `config.yaml` 已确认指向正确模型网关
-- [ ] `AIGUARD.md` 已补充当前项目规则
+- [ ] 规则文件已准备完成（默认可直接使用 `examples/AIGUARD.md`）
 - [ ] `frontend` 依赖可以正常安装
 - [ ] 本机 `git` / `go` / `npm` / `wails` 可用
 - [ ] 执行过 `wails doctor`
+- [ ] Linux 构建机如为 Ubuntu 24.04+，已确认 `webkit2gtk-4.1` 并使用 `webkit2_41` 构建 tag
 
 ## Windows 包
 
@@ -21,6 +22,12 @@
 - [ ] 如需分发，已完成签名
 - [ ] 如需对外分发，已完成 notarization
 - [ ] 已在目标 macOS 版本验证启动
+
+## Linux 包（可选，用于团队内测或开发机验证）
+
+- [ ] 已生成 `build/bin/AIGuard`
+- [ ] 已归档 Linux 产物到 `release/`
+- [ ] 已在目标 Linux 桌面环境验证启动
 
 ## 审计链路
 

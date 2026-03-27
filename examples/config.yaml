@@ -31,7 +31,7 @@ review:
   code_browse_base_url: ""
 
 rules:
-  custom_rule_file: "./AIGUARD.md"
+  custom_rule_file: "./examples/AIGUARD.md"
   ignore:
     - "node_modules/**"
     - "dist/**"

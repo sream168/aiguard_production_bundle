@@ -4,53 +4,200 @@
   <meta charset="UTF-8" />
   <title>{{ .Title }}</title>
   <style>
-    body { font-family: Arial, Helvetica, sans-serif; background:#0f172a; color:#e2e8f0; padding:32px; }
-    .card { background:#111827; border:1px solid #1f2937; border-radius:16px; padding:20px; margin-bottom:20px; }
-    h1,h2,h3 { margin:0 0 12px 0; }
-    h1 { font-size:28px; }
-    h2 { font-size:20px; margin-top:28px; }
-    .grid { display:grid; grid-template-columns:repeat(4, minmax(0, 1fr)); gap:16px; }
-    .metric { background:#0b1220; border:1px solid #243244; border-radius:14px; padding:16px; }
-    .metric .label { color:#94a3b8; font-size:13px; }
-    .metric .value { font-size:26px; font-weight:700; margin-top:8px; }
-    .finding { border-top:1px dashed #334155; padding-top:16px; margin-top:16px; }
-    .tag { display:inline-block; padding:4px 10px; border-radius:999px; background:#1e293b; margin-right:8px; font-size:12px; }
-    .muted { color:#94a3b8; }
-    ul { margin:8px 0 0 20px; }
-    code { background:#0b1220; padding:2px 6px; border-radius:6px; }
-    a { color:#93c5fd; text-decoration:none; }
-    a:hover { text-decoration:underline; }
-    .health { display:grid; grid-template-columns:repeat(5, minmax(0, 1fr)); gap:14px; }
-    .health .metric .value { font-size:22px; }
+    :root {
+      color-scheme: dark;
+      --bg: #08101f;
+      --bg-soft: rgba(13, 20, 37, 0.86);
+      --card: rgba(15, 23, 42, 0.92);
+      --border: rgba(99, 102, 241, 0.18);
+      --text: #e2e8f0;
+      --muted: #94a3b8;
+      --primary: #60a5fa;
+      --primary-2: #8b5cf6;
+      --accent: #2dd4bf;
+      --danger: #fb7185;
+      --warn: #fbbf24;
+      --shadow: 0 20px 48px rgba(0, 0, 0, 0.28);
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: Inter, Arial, Helvetica, sans-serif;
+      background:
+        radial-gradient(circle at top left, rgba(96, 165, 250, 0.16), transparent 28%),
+        radial-gradient(circle at top right, rgba(139, 92, 246, 0.14), transparent 30%),
+        linear-gradient(180deg, #09111f 0%, #08101f 100%);
+      color: var(--text);
+      padding: 32px;
+    }
+    .hero, .card, .metric, .finding-card, .project-card {
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+    }
+    .hero, .card, .project-card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 24px;
+      padding: 24px;
+      box-shadow: var(--shadow);
+      margin-bottom: 20px;
+    }
+    h1, h2, h3, p { margin-top: 0; }
+    h1 { font-size: 30px; margin-bottom: 10px; }
+    h2 { font-size: 22px; margin: 28px 0 14px; }
+    h3 { font-size: 18px; margin-bottom: 10px; }
+    .meta { color: var(--muted); line-height: 1.8; }
+    .grid, .health {
+      display: grid;
+      gap: 16px;
+    }
+    .grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+    .health { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+    .metric {
+      background: var(--bg-soft);
+      border: 1px solid rgba(96, 165, 250, 0.14);
+      border-radius: 20px;
+      padding: 16px 18px;
+    }
+    .metric .label { color: var(--muted); font-size: 13px; }
+    .metric .value { font-size: 28px; font-weight: 700; margin-top: 8px; }
+    .metric .value.critical { color: var(--danger); }
+    .metric .value.warn { color: var(--warn); }
+    .finding-card {
+      background: rgba(8, 16, 31, 0.82);
+      border: 1px solid rgba(99, 102, 241, 0.18);
+      border-radius: 22px;
+      padding: 18px 20px;
+      margin-bottom: 14px;
+      box-shadow: 0 16px 38px rgba(0, 0, 0, 0.22);
+    }
+    .finding-top {
+      display: flex;
+      justify-content: space-between;
+      gap: 16px;
+      align-items: flex-start;
+      margin-bottom: 10px;
+    }
+    .chips { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 10px; }
+    .tag {
+      display: inline-flex;
+      align-items: center;
+      padding: 4px 10px;
+      border-radius: 999px;
+      background: rgba(30, 41, 59, 0.92);
+      font-size: 12px;
+      color: #dbeafe;
+      border: 1px solid rgba(96, 165, 250, 0.16);
+    }
+    .tag.severe { background: rgba(190, 24, 93, 0.18); color: #fecdd3; border-color: rgba(251, 113, 133, 0.22); }
+    .tag.high { background: rgba(217, 119, 6, 0.18); color: #fde68a; border-color: rgba(251, 191, 36, 0.22); }
+    .tag.medium { background: rgba(59, 130, 246, 0.18); color: #bfdbfe; }
+    .tag.low { background: rgba(45, 212, 191, 0.14); color: #ccfbf1; }
+    .summary-3 {
+      color: #dbeafe;
+      line-height: 1.75;
+      display: -webkit-box;
+      -webkit-line-clamp: 3;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+      margin-bottom: 12px;
+    }
+    details summary {
+      cursor: pointer;
+      list-style: none;
+      color: var(--primary);
+      font-weight: 600;
+      user-select: none;
+    }
+    details summary::-webkit-details-marker { display: none; }
+    details[open] summary { margin-bottom: 14px; }
+    .detail-grid {
+      display: grid;
+      grid-template-columns: 160px 1fr;
+      gap: 10px 14px;
+      line-height: 1.7;
+      font-size: 14px;
+    }
+    .detail-grid .label { color: var(--muted); }
+    .detail-grid .value { color: var(--text); }
+    .code-block {
+      margin-top: 12px;
+      background: #030712;
+      border: 1px solid rgba(96, 165, 250, 0.14);
+      border-radius: 16px;
+      padding: 14px;
+      white-space: pre-wrap;
+      word-break: break-word;
+      overflow-x: auto;
+      color: #dbeafe;
+    }
+    .muted { color: var(--muted); }
+    ul { margin: 8px 0 0 20px; }
+    li { margin-bottom: 8px; }
+    code {
+      background: rgba(15, 23, 42, 0.98);
+      padding: 2px 6px;
+      border-radius: 8px;
+    }
+    a { color: #93c5fd; text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    @media (max-width: 1200px) {
+      .grid, .health { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    }
+    @media (max-width: 720px) {
+      body { padding: 18px; }
+      .grid, .health { grid-template-columns: 1fr; }
+      .detail-grid { grid-template-columns: 1fr; }
+      .finding-top { flex-direction: column; }
+    }
   </style>
 </head>
 <body>
-  <div class="card">
+  <div class="hero">
     <h1>{{ .Title }}</h1>
-    <div class="muted">生成时间：{{ .CreatedAt }}</div>
-    <div class="muted">仓库：{{ .Scope.RepoURL }}</div>
-    <div class="muted">分支：{{ .Scope.SourceBranch }} -> {{ .Scope.TargetBranch }}</div>
-    <div class="muted">变更文件数：{{ .Scope.ChangedFiles }}</div>
+    <div class="meta">生成时间：{{ .CreatedAt }}</div>
+    <div class="meta">仓库：{{ .Scope.RepoURL }}</div>
+    <div class="meta">分支：{{ .Scope.SourceBranch }} -> {{ .Scope.TargetBranch }}</div>
+    <div class="meta">变更文件数：{{ .Scope.ChangedFiles }}</div>
   </div>
 
   <h2>1. 问题清单</h2>
   <div class="card">
     {{ if .Findings }}
       {{ range .Findings }}
-        <div class="finding">
-          <h3>{{ .ID }}：{{ .Title }}（{{ .Severity }}）</h3>
-          <div><span class="tag">{{ .Category }}</span><span class="tag">{{ .Confidence }}</span></div>
-          {{ $u := codeJumpURL .File .LineStart }}
-          <p><strong>文件：</strong>
-            {{ if $u }}<a href="{{ $u }}"><code>{{ .File }}</code></a>{{ else }}<code>{{ .File }}</code>{{ end }}
-          </p>
-          <p><strong>行号：</strong>
-            {{ if $u }}<a href="{{ $u }}">{{ .LineStart }} - {{ .LineEnd }}</a>{{ else }}{{ .LineStart }} - {{ .LineEnd }}{{ end }}
-          </p>
-          <p><strong>详细描述：</strong>{{ .Description }}</p>
-          <p><strong>影响分析：</strong>{{ .Impact }}</p>
-          <p><strong>证据：</strong>{{ .Evidence }}</p>
-          <p><strong>修复建议：</strong>{{ .Recommendation }}</p>
+        {{ $u := codeJumpURL .File .LineStart }}
+        <div class="finding-card">
+          <div class="finding-top">
+            <div>
+              <h3>{{ .ID }} · {{ .Title }}</h3>
+              <div class="chips">
+                <span class="tag {{ if eq .Severity "严重" }}severe{{ else if eq .Severity "高危" }}high{{ else if eq .Severity "一般" }}medium{{ else }}low{{ end }}">{{ .Severity }}</span>
+                <span class="tag">{{ .Category }}</span>
+                <span class="tag">{{ .Confidence }}</span>
+              </div>
+            </div>
+            <div class="muted">
+              {{ if $u }}<a href="{{ $u }}"><code>{{ .File }}</code></a>{{ else }}<code>{{ .File }}</code>{{ end }}
+              · {{ .LineStart }} - {{ .LineEnd }}
+            </div>
+          </div>
+          <p class="summary-3">{{ .Description }}</p>
+          <details>
+            <summary>展开查看审计详情</summary>
+            <div class="detail-grid">
+              <div class="label">详细描述</div>
+              <div class="value">{{ .Description }}</div>
+              <div class="label">影响分析</div>
+              <div class="value">{{ .Impact }}</div>
+              <div class="label">证据</div>
+              <div class="value">{{ .Evidence }}</div>
+              <div class="label">修复建议</div>
+              <div class="value">{{ .Recommendation }}</div>
+            </div>
+            {{ if .RecommendationCode }}
+              <div class="code-block">{{ .RecommendationCode }}</div>
+            {{ end }}
+          </details>
         </div>
       {{ end }}
     {{ else }}
@@ -60,8 +207,8 @@
 
   <h2>2. 整体统计</h2>
   <div class="grid">
-    <div class="metric"><div class="label">高（高危+严重）</div><div class="value">{{ .Summary.High }}</div></div>
-    <div class="metric"><div class="label">中（一般）</div><div class="value">{{ .Summary.Medium }}</div></div>
+    <div class="metric"><div class="label">高（高危+严重）</div><div class="value critical">{{ .Summary.High }}</div></div>
+    <div class="metric"><div class="label">中（一般）</div><div class="value warn">{{ .Summary.Medium }}</div></div>
     <div class="metric"><div class="label">低（建议）</div><div class="value">{{ .Summary.Low }}</div></div>
     <div class="metric"><div class="label">总计</div><div class="value">{{ .Summary.Total }}</div></div>
   </div>
@@ -85,7 +232,7 @@
   </div>
 
   <h2>项目画像</h2>
-  <div class="card">
+  <div class="project-card">
     <p><strong>项目用途：</strong>{{ .ProjectBrief.Purpose }}</p>
     <p><strong>技术栈：</strong>{{ range $index, $item := .ProjectBrief.TechStack }}{{ if $index }}, {{ end }}{{ $item }}{{ end }}</p>
     <p><strong>框架：</strong>{{ range $index, $item := .ProjectBrief.Frameworks }}{{ if $index }}, {{ end }}{{ $item }}{{ end }}</p>

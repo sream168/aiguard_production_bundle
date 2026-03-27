@@ -23,29 +23,35 @@ type Paths struct {
 	HTML     string
 }
 
-func SaveAll(rpt model.Report, dir string, diff *model.DiffSet, packs []model.ReviewPack, prescan []model.Finding) (Paths, error) {
+func SaveAll(rpt model.Report, dir string, formats []string, diff *model.DiffSet, packs []model.ReviewPack, prescan []model.Finding) (Paths, error) {
 	if err := os.MkdirAll(filepath.Join(dir, "artifacts"), 0o755); err != nil {
 		return Paths{}, err
 	}
 
-	paths := Paths{
-		JSON:     filepath.Join(dir, "report.json"),
-		Markdown: filepath.Join(dir, "report.md"),
-		HTML:     filepath.Join(dir, "report.html"),
-	}
+	enabled := enabledFormats(formats)
+	paths := Paths{}
 
-	if err := writeJSON(paths.JSON, rpt); err != nil {
-		return Paths{}, err
+	if enabled["json"] {
+		paths.JSON = filepath.Join(dir, "report.json")
+		if err := writeJSON(paths.JSON, rpt); err != nil {
+			return Paths{}, err
+		}
 	}
-	if err := os.WriteFile(paths.Markdown, []byte(renderMarkdown(rpt)), 0o644); err != nil {
-		return Paths{}, err
+	if enabled["md"] {
+		paths.Markdown = filepath.Join(dir, "report.md")
+		if err := os.WriteFile(paths.Markdown, []byte(renderMarkdown(rpt)), 0o644); err != nil {
+			return Paths{}, err
+		}
 	}
-	htmlContent, err := renderHTML(rpt)
-	if err != nil {
-		return Paths{}, err
-	}
-	if err := os.WriteFile(paths.HTML, []byte(htmlContent), 0o644); err != nil {
-		return Paths{}, err
+	if enabled["html"] {
+		paths.HTML = filepath.Join(dir, "report.html")
+		htmlContent, err := renderHTML(rpt)
+		if err != nil {
+			return Paths{}, err
+		}
+		if err := os.WriteFile(paths.HTML, []byte(htmlContent), 0o644); err != nil {
+			return Paths{}, err
+		}
 	}
 
 	_ = writeJSON(filepath.Join(dir, "artifacts", "diff.json"), diff)
@@ -54,6 +60,27 @@ func SaveAll(rpt model.Report, dir string, diff *model.DiffSet, packs []model.Re
 	_ = writeJSON(filepath.Join(dir, "artifacts", "prescan_findings.json"), prescan)
 
 	return paths, nil
+}
+
+func enabledFormats(formats []string) map[string]bool {
+	if len(formats) == 0 {
+		return map[string]bool{"json": true, "md": true, "html": true}
+	}
+	enabled := map[string]bool{}
+	for _, format := range formats {
+		switch strings.ToLower(strings.TrimSpace(format)) {
+		case "json":
+			enabled["json"] = true
+		case "md", "markdown":
+			enabled["md"] = true
+		case "html":
+			enabled["html"] = true
+		}
+	}
+	if len(enabled) == 0 {
+		return map[string]bool{"json": true, "md": true, "html": true}
+	}
+	return enabled
 }
 
 func writeJSON(path string, value any) error {
@@ -90,7 +117,14 @@ func renderMarkdown(rpt model.Report) string {
 		b.WriteString(fmt.Sprintf("- 分类：%s\n", item.Category))
 		b.WriteString(fmt.Sprintf("- 详细描述：%s\n", item.Description))
 		b.WriteString(fmt.Sprintf("- 影响分析：%s\n", item.Impact))
-		b.WriteString(fmt.Sprintf("- 修复建议：%s\n\n", item.Recommendation))
+		b.WriteString(fmt.Sprintf("- 证据：%s\n", item.Evidence))
+		b.WriteString(fmt.Sprintf("- 修复建议：%s\n", item.Recommendation))
+		if strings.TrimSpace(item.RecommendationCode) != "" {
+			b.WriteString("- 建议代码片段：\n\n```\n")
+			b.WriteString(item.RecommendationCode)
+			b.WriteString("\n```\n")
+		}
+		b.WriteString("\n")
 	}
 
 	b.WriteString("## 2. 整体统计\n\n")

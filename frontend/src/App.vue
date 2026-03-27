@@ -1,11 +1,19 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, onUnmounted, ref } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { backend } from './bridge'
-import type { HistoryItem, LogState, ProgressEvent, ReviewDoneEvent, StartReviewRequest } from './types'
+import type {
+  HistoryItem,
+  LogState,
+  ProgressEvent,
+  RepositorySuggestion,
+  ReviewDoneEvent,
+  StartReviewRequest
+} from './types'
 import ReviewForm from './components/ReviewForm.vue'
 import ProgressPanel from './components/ProgressPanel.vue'
 import LogViewer from './components/LogViewer.vue'
 import HistoryList from './components/HistoryList.vue'
+import ReportViewer from './components/ReportViewer.vue'
 
 const form = ref<StartReviewRequest>({
   mrUrl: '',
@@ -29,18 +37,32 @@ const infoMessage = ref('')
 const availableBranches = ref<string[]>([])
 const showLogs = ref(false)
 const logState = ref<LogState>({ logPath: '', content: '', updatedAt: '' })
-const logViewerRef = ref<InstanceType<typeof LogViewer> | null>(null)
+const logViewerRef = ref<any>(null)
+const repoSuggestion = ref<RepositorySuggestion>({
+  repoUrl: '',
+  candidates: [],
+  resolvedByMr: false,
+  manualRepoUrl: '',
+  message: ''
+})
 
 let logTimer: number | null = null
+let repoSuggestTimer: number | null = null
+const lastSuggestedRepoUrl = ref('')
+const manualRepoOverride = ref(false)
 
 const runtimeRequest = computed(() => ({
   configPath: form.value.configPath,
   workspaceDir: form.value.workspaceDir
 }))
 
-const findings = computed(() => doneEvent.value?.report.findings ?? [])
-const report = computed(() => doneEvent.value?.report)
+const report = computed(() => doneEvent.value?.report ?? null)
 const disabled = computed(() => running.value || pullingCode.value || clearingCache.value)
+const statusText = computed(() => {
+  if (running.value) return '监视进行中'
+  if (doneEvent.value) return '报告已生成'
+  return '等待任务启动'
+})
 
 function normalizeError(err: unknown): string {
   if (err instanceof Error) return err.message
@@ -70,8 +92,9 @@ async function loadLogState(forceScroll = false) {
   logState.value = await backend.getLogState(runtimeRequest.value)
   if (showLogs.value || forceScroll) {
     await nextTick()
-    if (logViewerRef.value?.logViewerRef) {
-      logViewerRef.value.logViewerRef.scrollTop = logViewerRef.value.logViewerRef.scrollHeight
+    const logEl = logViewerRef.value?.logViewerRef
+    if (logEl) {
+      logEl.scrollTop = logEl.scrollHeight
     }
   }
 }
@@ -88,12 +111,51 @@ function startLogPolling() {
   logTimer = window.setInterval(() => void loadLogState(true), 1000)
 }
 
+function handleRepoUrlEdited(value: string) {
+  const normalized = value.trim()
+  manualRepoOverride.value = normalized !== '' && normalized !== lastSuggestedRepoUrl.value
+  if (normalized === '' || normalized === lastSuggestedRepoUrl.value) {
+    manualRepoOverride.value = false
+  }
+}
+
+async function suggestRepository() {
+  if (!form.value.mrUrl.trim() && !form.value.repoUrl.trim()) {
+    repoSuggestion.value = {
+      repoUrl: '',
+      candidates: [],
+      resolvedByMr: false,
+      manualRepoUrl: '',
+      message: ''
+    }
+    lastSuggestedRepoUrl.value = ''
+    return
+  }
+
+  try {
+    const suggestion = await backend.suggestRepository(form.value)
+    repoSuggestion.value = suggestion
+    if (
+      suggestion.repoUrl &&
+      (!manualRepoOverride.value || !form.value.repoUrl.trim() || form.value.repoUrl.trim() === lastSuggestedRepoUrl.value)
+    ) {
+      form.value.repoUrl = suggestion.repoUrl
+    }
+    lastSuggestedRepoUrl.value = suggestion.repoUrl
+  } catch {
+    // 自动提示不阻断主流程
+  }
+}
+
 async function pullCode() {
   clearMessages()
   pullingCode.value = true
   try {
     const result = await backend.pullCode(form.value)
-    if (result.repoUrl) form.value.repoUrl = result.repoUrl
+    if (result.repoUrl) {
+      form.value.repoUrl = result.repoUrl
+      lastSuggestedRepoUrl.value = result.repoUrl
+    }
     form.value.sourceBranch = result.sourceBranch || form.value.sourceBranch
     form.value.targetBranch = result.targetBranch || form.value.targetBranch
     availableBranches.value = result.availableBranches ?? []
@@ -142,6 +204,7 @@ async function clearCache() {
     const result = await backend.clearCache(runtimeRequest.value)
     setInfo(result.message || '缓存已清理。')
     history.value = []
+    doneEvent.value = null
     await loadLogState(true)
   } catch (err) {
     setError(normalizeError(err))
@@ -160,259 +223,243 @@ function toggleLogs() {
   }
 }
 
+async function openReport(payload?: { htmlPath: string; reportDir: string }) {
+  clearMessages()
+  const target = payload ?? {
+    htmlPath: doneEvent.value?.htmlPath || '',
+    reportDir: doneEvent.value?.reportDir || ''
+  }
+  try {
+    const result = await backend.openReport(target)
+    setInfo(result.message || '已打开报告。')
+  } catch (err) {
+    setError(normalizeError(err))
+  }
+}
+
+function openHistoryReport(item: HistoryItem) {
+  void openReport({ htmlPath: item.htmlPath, reportDir: item.reportDir })
+}
+
+function openHistoryReportDirectory(item: HistoryItem) {
+  void openReportDirectory({ reportDir: item.reportDir })
+}
+
+async function openReportDirectory(payload?: { reportDir: string }) {
+  clearMessages()
+  const target = payload ?? { reportDir: doneEvent.value?.reportDir || '' }
+  try {
+    const result = await backend.openReportDirectory(target)
+    setInfo(result.message || '已打开报告目录。')
+  } catch (err) {
+    setError(normalizeError(err))
+  }
+}
+
+watch(
+  () => [form.value.mrUrl, form.value.configPath],
+  () => {
+    if (repoSuggestTimer !== null) {
+      window.clearTimeout(repoSuggestTimer)
+    }
+    repoSuggestTimer = window.setTimeout(() => void suggestRepository(), 280)
+  }
+)
+
 onMounted(() => {
   void loadHistory()
   void loadLogState()
-  window.runtime.EventsOn('review:progress', (event: ProgressEvent) => {
+  void suggestRepository()
+
+  window.runtime?.EventsOn?.('review:progress', (event: ProgressEvent) => {
     progress.value = event
   })
-  window.runtime.EventsOn('review:error', (event: { taskId: string; message: string }) => {
+  window.runtime?.EventsOn?.('review:error', (event: { taskId: string; message: string }) => {
     running.value = false
     setError(event.message)
     stopLogPolling()
   })
-  window.runtime.EventsOn('review:done', (event: ReviewDoneEvent) => {
+  window.runtime?.EventsOn?.('review:done', (event: ReviewDoneEvent) => {
     running.value = false
     doneEvent.value = event
     stopLogPolling()
+    setInfo('监视完成，报告已生成。你可以直接点击“查看报告”打开 HTML 报告。')
     void loadHistory()
   })
 })
 
 onUnmounted(() => {
   stopLogPolling()
+  if (repoSuggestTimer !== null) {
+    window.clearTimeout(repoSuggestTimer)
+    repoSuggestTimer = null
+  }
 })
 </script>
 
 <template>
-  <div class="app">
-    <header class="header">
-      <h1>AI代码监视</h1>
-      <p class="subtitle">基于 LLM 的代码审计工具</p>
+  <div class="app-shell">
+    <header class="hero hero-panel">
+      <div>
+        <h1>AI代码监视 Pro</h1>
+        <p>
+          面向生产交付的桌面审计界面：支持 MR/PR 自动识别仓库地址、历史报告回溯、HTML 报告快捷打开，
+          并对结果卡片做了默认折叠与可展开详情优化。
+        </p>
+      </div>
+      <div class="hero-status">
+        <div class="status-badge">{{ statusText }}</div>
+        <div class="small">工作区：{{ form.workspaceDir || './workspace' }}</div>
+      </div>
     </header>
 
-    <main class="main">
-      <div v-if="errorMessage" class="message error">{{ errorMessage }}</div>
-      <div v-if="infoMessage" class="message info">{{ infoMessage }}</div>
+    <div v-if="errorMessage" class="notice error">{{ errorMessage }}</div>
+    <div v-if="infoMessage" class="notice success">{{ infoMessage }}</div>
 
-      <ReviewForm
-        :form="form"
-        :available-branches="availableBranches"
-        :running="running"
-        :pulling-code="pullingCode"
-        :clearing-cache="clearingCache"
-        :show-logs="showLogs"
-        :disabled="disabled"
-        @pull-code="pullCode"
-        @start-review="startReview"
-        @cancel-review="cancelReview"
-        @toggle-logs="toggleLogs"
-        @clear-cache="clearCache"
-        @load-history="loadHistory"
-      />
-
-      <ProgressPanel :progress="progress" />
-
-      <LogViewer
-        ref="logViewerRef"
-        :show="showLogs"
-        :log-path="logState.logPath"
-        :content="logState.content"
-      />
-
-      <div v-if="report" class="report-section">
-        <h2>审计报告</h2>
-        <div class="report-summary">
-          <div class="summary-item">
-            <span class="label">总问题数</span>
-            <span class="value">{{ findings.length }}</span>
-          </div>
-          <div class="summary-item">
-            <span class="label">严重</span>
-            <span class="value critical">{{ findings.filter(f => f.severity === '严重').length }}</span>
-          </div>
-          <div class="summary-item">
-            <span class="label">高危</span>
-            <span class="value high">{{ findings.filter(f => f.severity === '高危').length }}</span>
-          </div>
+    <main class="layout">
+      <section class="left-column">
+        <div class="card glow-card">
+          <ReviewForm
+            :form="form"
+            :available-branches="availableBranches"
+            :running="running"
+            :pulling-code="pullingCode"
+            :clearing-cache="clearingCache"
+            :show-logs="showLogs"
+            :disabled="disabled"
+            :repo-suggestion-message="repoSuggestion.message"
+            :repo-suggestion-candidates="repoSuggestion.candidates"
+            :repo-suggestion-resolved-by-mr="repoSuggestion.resolvedByMr"
+            @pull-code="pullCode"
+            @start-review="startReview"
+            @cancel-review="cancelReview"
+            @toggle-logs="toggleLogs"
+            @clear-cache="clearCache"
+            @load-history="loadHistory"
+            @repo-url-edited="handleRepoUrlEdited"
+          />
         </div>
 
-        <div v-if="findings.length > 0" class="findings-list">
-          <div v-for="(finding, idx) in findings" :key="idx" class="finding-item">
-            <div class="finding-header">
-              <span :class="['severity', finding.severity]">{{ finding.severity }}</span>
-              <span class="category">{{ finding.category }}</span>
+        <div class="card glow-card">
+          <HistoryList
+            :history="history"
+            @open-report="openHistoryReport"
+            @open-dir="openHistoryReportDirectory"
+          />
+        </div>
+      </section>
+
+      <section class="right-column">
+        <div class="card glow-card" v-if="progress || running">
+          <div class="panel-header compact">
+            <div>
+              <h2>执行状态</h2>
+              <p class="small">监视完成后会自动生成 HTML / Markdown / JSON 报告。</p>
             </div>
-            <h3>{{ finding.title }}</h3>
-            <p class="description">{{ finding.description }}</p>
-            <div class="location">{{ finding.file }}:{{ finding.line }}</div>
+            <div class="report-actions-inline" v-if="doneEvent">
+              <button class="small-action primary" @click="openReport()">查看报告</button>
+              <button class="small-action secondary" @click="openReportDirectory()">打开目录</button>
+            </div>
           </div>
+          <ProgressPanel :progress="progress" />
         </div>
-      </div>
 
-      <HistoryList :history="history" />
+        <div class="card glow-card" v-if="showLogs">
+          <div class="panel-header compact">
+            <div>
+              <h2>运行日志</h2>
+              <p class="small">{{ logState.updatedAt ? `最后更新：${logState.updatedAt}` : '等待日志输出' }}</p>
+            </div>
+          </div>
+          <LogViewer ref="logViewerRef" :show="showLogs" :log-path="logState.logPath" :content="logState.content" />
+        </div>
+
+        <div class="card glow-card" v-if="report && doneEvent">
+          <ReportViewer
+            :report="report"
+            :html-path="doneEvent.htmlPath"
+            :report-dir="doneEvent.reportDir"
+            @open-report="openReport"
+            @open-report-dir="openReportDirectory"
+          />
+        </div>
+      </section>
     </main>
   </div>
 </template>
 
 <style scoped>
-.app {
-  min-height: 100vh;
-  background: #0f172a;
-  color: #e2e8f0;
+.hero-panel {
+  background: linear-gradient(135deg, rgba(14, 23, 42, 0.92), rgba(30, 41, 59, 0.82));
+  border: 1px solid rgba(99, 102, 241, 0.18);
+  border-radius: 1.5rem;
+  padding: 1.5rem 1.6rem;
+  box-shadow: 0 20px 42px rgba(0, 0, 0, 0.22);
 }
 
-.header {
-  background: linear-gradient(135deg, #1e293b 0%, #334155 100%);
-  padding: 2rem;
-  text-align: center;
-  border-bottom: 2px solid #3b82f6;
+.hero-panel h1 {
+  margin: 0 0 0.5rem;
+  font-size: 2.1rem;
+  color: #eef2ff;
 }
 
-.header h1 {
-  margin: 0;
-  font-size: 2rem;
-  color: #60a5fa;
-}
-
-.subtitle {
-  margin: 0.5rem 0 0;
-  color: #94a3b8;
-  font-size: 0.95rem;
-}
-
-.main {
-  max-width: 1200px;
-  margin: 0 auto;
-  padding: 2rem;
-}
-
-.message {
-  padding: 1rem;
-  border-radius: 0.5rem;
-  margin-bottom: 1rem;
-  font-size: 0.9rem;
-}
-
-.message.error {
-  background: #7f1d1d;
-  border: 1px solid #dc2626;
-  color: #fecaca;
-}
-
-.message.info {
-  background: #1e3a8a;
-  border: 1px solid #3b82f6;
-  color: #bfdbfe;
-}
-
-.report-section {
-  margin-top: 2rem;
-  background: #1e293b;
-  padding: 1.5rem;
-  border-radius: 0.5rem;
-}
-
-.report-section h2 {
-  margin: 0 0 1rem;
-  font-size: 1.25rem;
-}
-
-.report-summary {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 1rem;
-  margin-bottom: 1.5rem;
-}
-
-.summary-item {
-  background: #0f172a;
-  padding: 1rem;
-  border-radius: 0.375rem;
+.hero-status {
   display: flex;
   flex-direction: column;
-  gap: 0.5rem;
+  align-items: flex-end;
+  gap: 0.6rem;
 }
 
-.summary-item .label {
-  font-size: 0.85rem;
-  color: #94a3b8;
-}
-
-.summary-item .value {
-  font-size: 1.5rem;
+.status-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.45rem 0.85rem;
+  border-radius: 999px;
+  background: linear-gradient(135deg, rgba(37, 99, 235, 0.22), rgba(124, 58, 237, 0.22));
+  color: #dbeafe;
+  border: 1px solid rgba(96, 165, 250, 0.24);
   font-weight: 700;
-  color: #60a5fa;
 }
 
-.summary-item .value.critical {
-  color: #ef4444;
+.glow-card {
+  position: relative;
+  overflow: hidden;
 }
 
-.summary-item .value.high {
-  color: #f59e0b;
+.glow-card::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: radial-gradient(circle at top right, rgba(96, 165, 250, 0.08), transparent 28%),
+    radial-gradient(circle at bottom left, rgba(34, 197, 94, 0.06), transparent 26%);
 }
 
-.findings-list {
-  display: flex;
-  flex-direction: column;
-  gap: 1rem;
+.report-actions-inline,
+.report-actions-inline + * {
+  position: relative;
+  z-index: 1;
 }
 
-.finding-item {
-  background: #0f172a;
-  padding: 1rem;
-  border-radius: 0.375rem;
-  border-left: 3px solid #3b82f6;
+.small-action {
+  border: none;
+  border-radius: 0.9rem;
+  padding: 0.6rem 0.85rem;
+  color: white;
+  cursor: pointer;
 }
 
-.finding-header {
-  display: flex;
-  gap: 0.75rem;
-  margin-bottom: 0.5rem;
+.small-action.primary {
+  background: linear-gradient(135deg, #2563eb, #7c3aed);
 }
 
-.severity {
-  padding: 0.25rem 0.5rem;
-  border-radius: 0.25rem;
-  font-size: 0.75rem;
-  font-weight: 600;
+.small-action.secondary {
+  background: rgba(51, 65, 85, 0.92);
 }
 
-.severity.严重 {
-  background: #7f1d1d;
-  color: #fecaca;
-}
-
-.severity.高危 {
-  background: #78350f;
-  color: #fed7aa;
-}
-
-.category {
-  padding: 0.25rem 0.5rem;
-  background: #1e3a8a;
-  color: #bfdbfe;
-  border-radius: 0.25rem;
-  font-size: 0.75rem;
-}
-
-.finding-item h3 {
-  margin: 0 0 0.5rem;
-  font-size: 1rem;
-  color: #f1f5f9;
-}
-
-.description {
-  margin: 0 0 0.5rem;
-  font-size: 0.85rem;
-  color: #cbd5e1;
-  line-height: 1.5;
-}
-
-.location {
-  font-family: monospace;
-  font-size: 0.8rem;
-  color: #64748b;
+@media (max-width: 1280px) {
+  .hero-status {
+    align-items: flex-start;
+  }
 }
 </style>

@@ -22,6 +22,14 @@ export interface PrepareRepositoryResponse {
   message: string
 }
 
+export interface RepositorySuggestion {
+  repoUrl: string
+  candidates: string[]
+  resolvedByMr: boolean
+  manualRepoUrl: string
+  message: string
+}
+
 export interface LogState {
   logPath: string
   content: string
@@ -32,6 +40,12 @@ export interface CacheClearResult {
   workspaceDir: string
   logPath: string
   removed: string[]
+  message: string
+}
+
+export interface OpenPathResult {
+  path: string
+  mode: string
   message: string
 }
 
@@ -58,6 +72,7 @@ export interface Finding {
   impact: string
   evidence: string
   recommendation: string
+  recommendationCode?: string
 }
 
 export interface Summary {
@@ -106,6 +121,9 @@ export interface HistoryItem {
   targetRef: string
   createdAt: string
   reportDir: string
+  htmlPath: string
+  markdownPath: string
+  jsonPath: string
   totalIssues: number
   summary: Summary
 }

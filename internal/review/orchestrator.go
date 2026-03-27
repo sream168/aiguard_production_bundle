@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -100,18 +101,41 @@ func (o *Orchestrator) Run(ctx context.Context, taskID string, req uiapi.StartRe
 	}
 
 	emitProgress(emit, taskID, "项目画像", 30, "构建项目背景、模块与风险热点画像", model.Summary{})
-	brief, _ := projectctx.NewBuilder().Build(worktreePath, diff, cfg.Rules.CustomRuleFile)
+	brief := model.ProjectBrief{}
+	if cfg.Review.EnableProjectBrief {
+		brief, _ = projectctx.NewBuilder().Build(worktreePath, diff, cfg.Rules.CustomRuleFile)
+	} else {
+		notes := []string{"已按配置跳过项目画像构建。"}
+		_ = notes
+	}
 
-	emitProgress(emit, taskID, "规则预扫", 45, "执行确定性规则预扫", model.Summary{})
-	scanRes := scanner.New().Run(diff)
+	scanRes := scanner.Result{Hints: map[string][]string{}}
+	if cfg.Review.EnablePreScan {
+		emitProgress(emit, taskID, "规则预扫", 45, "执行确定性规则预扫", model.Summary{})
+		scanRes = scanner.New().Run(diff)
+	} else {
+		emitProgress(emit, taskID, "规则预扫", 45, "按配置跳过规则预扫", model.Summary{})
+	}
 	preSummary := findings.BuildSummary(scanRes.Findings)
-	emitProgress(emit, taskID, "规则预扫", 52, "规则预扫完成", preSummary)
+	if cfg.Review.EnablePreScan {
+		emitProgress(emit, taskID, "规则预扫", 52, "规则预扫完成", preSummary)
+	}
 
 	emitProgress(emit, taskID, "构建审计包", 60, "根据 diff 与上下文构建 Review Packs", preSummary)
 	packs := packer.New(cfg.Runtime.SafeInputTokens).Build(diff, brief, scanRes.Hints)
+	reportPacks := packs
+	if cfg.Review.RedactSecretsBeforeLLM {
+		reportPacks = sanitizePacks(packs)
+	}
 
 	notes := []string{
 		fmt.Sprintf("审计范围：%d 个变更文件，基于 merge-base 差异语义。", len(diff.Files)),
+	}
+	if !cfg.Review.EnableProjectBrief {
+		notes = append(notes, "已按配置跳过项目画像构建。")
+	}
+	if !cfg.Review.EnablePreScan {
+		notes = append(notes, "已按配置跳过规则预扫。")
 	}
 	if len(packs) == 0 {
 		notes = append(notes, "未生成可供模型审计的 Review Pack，可能是本次差异为空或仅包含二进制/无文本内容文件。")
@@ -119,9 +143,9 @@ func (o *Orchestrator) Run(ctx context.Context, taskID string, req uiapi.StartRe
 
 	llmClient := llm.New(cfg)
 	llmFindings := []model.Finding{}
-	if llmClient.Enabled() && len(packs) > 0 {
+	if llmClient.Enabled() && len(reportPacks) > 0 {
 		emitProgress(emit, taskID, "AI审计", 68, "开始调用模型进行分片审计", preSummary)
-		llmFindings, notes = o.runLLMReview(ctx, taskID, emit, llmClient, packs, notes, cfg.Runtime.Concurrency, preSummary)
+		llmFindings, notes = o.runLLMReview(ctx, taskID, emit, llmClient, reportPacks, notes, cfg.Runtime.Concurrency, preSummary)
 	} else {
 		notes = append(notes, "模型未启用或没有可审计的 pack，本次报告主要基于规则预扫与项目画像生成。")
 	}
@@ -152,12 +176,12 @@ func (o *Orchestrator) Run(ctx context.Context, taskID string, req uiapi.StartRe
 			SourceCommit: sourceCommit,
 			ChangedFiles: len(diff.Files),
 		},
-		ProjectBrief: brief,
-		Findings:     allFindings,
-		Summary:      summary,
-		Health:       health,
-		Notes:        notes,
-		Comparison:   comparison,
+		ProjectBrief:      brief,
+		Findings:          allFindings,
+		Summary:           summary,
+		Health:            health,
+		Notes:             notes,
+		Comparison:        comparison,
 		CodeBrowseBaseURL: strings.TrimRight(strings.TrimSpace(cfg.Review.CodeBrowseBaseURL), "/"),
 		ArtifactsHint: []string{
 			"artifacts/diff.json",
@@ -169,7 +193,7 @@ func (o *Orchestrator) Run(ctx context.Context, taskID string, req uiapi.StartRe
 
 	emitProgress(emit, taskID, "生成报告", 95, "生成 HTML / Markdown / JSON 报告", summary)
 	reportDir := filepath.Join(layout.Reports, taskID)
-	paths, err := report.SaveAll(rpt, reportDir, diff, packs, scanRes.Findings)
+	paths, err := report.SaveAll(rpt, reportDir, cfg.Review.ExportFormats, diff, reportPacks, scanRes.Findings)
 	if err != nil {
 		return uiapi.ReviewDoneEvent{}, err
 	}
@@ -364,29 +388,53 @@ func (o *Orchestrator) ListHistory(workspaceDir string) ([]uiapi.HistoryItem, er
 	}
 	items := make([]uiapi.HistoryItem, 0, len(reports))
 	for _, rpt := range reports {
+		reportDir := filepath.Join(layout.Reports, rpt.TaskID)
 		items = append(items, uiapi.HistoryItem{
-			TaskID:      rpt.TaskID,
-			Title:       rpt.Title,
-			RepoURL:     rpt.Scope.RepoURL,
-			SourceRef:   rpt.Scope.SourceBranch,
-			TargetRef:   rpt.Scope.TargetBranch,
-			CreatedAt:   rpt.CreatedAt,
-			ReportDir:   filepath.Join(layout.Reports, rpt.TaskID),
-			TotalIssues: rpt.Summary.Total,
-			Summary:     rpt.Summary,
+			TaskID:       rpt.TaskID,
+			Title:        rpt.Title,
+			RepoURL:      rpt.Scope.RepoURL,
+			SourceRef:    rpt.Scope.SourceBranch,
+			TargetRef:    rpt.Scope.TargetBranch,
+			CreatedAt:    rpt.CreatedAt,
+			ReportDir:    reportDir,
+			HTMLPath:     filepath.Join(reportDir, "report.html"),
+			MarkdownPath: filepath.Join(reportDir, "report.md"),
+			JSONPath:     filepath.Join(reportDir, "report.json"),
+			TotalIssues:  rpt.Summary.Total,
+			Summary:      rpt.Summary,
 		})
 	}
 	return items, nil
 }
 
 func sanitizePack(pack model.ReviewPack) model.ReviewPack {
-	replacer := strings.NewReplacer(
-		"Authorization: Bearer ", "Authorization: Bearer [REDACTED]",
-		"authorization: bearer ", "authorization: bearer [REDACTED]",
-	)
-	pack.DiffText = replacer.Replace(pack.DiffText)
-	pack.ContextText = replacer.Replace(pack.ContextText)
+	pack.DiffText = redactSecrets(pack.DiffText)
+	pack.ContextText = redactSecrets(pack.ContextText)
 	return pack
+}
+
+func sanitizePacks(packs []model.ReviewPack) []model.ReviewPack {
+	if len(packs) == 0 {
+		return nil
+	}
+	out := make([]model.ReviewPack, 0, len(packs))
+	for _, pack := range packs {
+		out = append(out, sanitizePack(pack))
+	}
+	return out
+}
+
+func redactSecrets(text string) string {
+	patterns := []*regexp.Regexp{
+		regexp.MustCompile(`(?i)(authorization\s*:\s*bearer\s+)([^\s"']+)`),
+		regexp.MustCompile(`(?i)(api[_-]?key\s*[:=]\s*["']?)([^"'\s]{4,})(["']?)`),
+		regexp.MustCompile(`(?i)(secret\s*[:=]\s*["']?)([^"'\s]{4,})(["']?)`),
+		regexp.MustCompile(`(?i)(token\s*[:=]\s*["']?)([^"'\s]{4,})(["']?)`),
+	}
+	for _, pattern := range patterns {
+		text = pattern.ReplaceAllString(text, `${1}[REDACTED]${3}`)
+	}
+	return text
 }
 
 func emitProgress(emit func(string, any), taskID, stage string, percent int, message string, summary model.Summary) {
