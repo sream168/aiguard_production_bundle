@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"aiguard/internal/model"
+	"aiguard/internal/strutil"
 )
 
 func List(reportsRoot string) ([]model.Report, error) {
@@ -52,7 +53,7 @@ func FindLatest(reportsRoot, repoIdentity, repoURL, source, target, exceptTaskID
 			continue
 		}
 		if strings.TrimSpace(repoIdentity) != "" {
-			currentIdentity := firstNonEmpty(strings.TrimSpace(rpt.Scope.RepoIdentity), strings.TrimSpace(rpt.Scope.RepoURL))
+			currentIdentity := strutil.FirstNonEmpty(strings.TrimSpace(rpt.Scope.RepoIdentity), strings.TrimSpace(rpt.Scope.RepoURL))
 			if currentIdentity != strings.TrimSpace(repoIdentity) {
 				continue
 			}
@@ -124,14 +125,4 @@ func unique(items []string) []string {
 		out = append(out, item)
 	}
 	return out
-}
-
-func firstNonEmpty(values ...string) string {
-	for _, value := range values {
-		value = strings.TrimSpace(value)
-		if value != "" {
-			return value
-		}
-	}
-	return ""
 }

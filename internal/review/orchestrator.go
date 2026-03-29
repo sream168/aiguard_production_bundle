@@ -21,6 +21,7 @@ import (
 	"aiguard/internal/provider"
 	"aiguard/internal/report"
 	"aiguard/internal/scanner"
+	"aiguard/internal/strutil"
 	"aiguard/internal/uiapi"
 	"aiguard/internal/workspace"
 )
@@ -224,7 +225,7 @@ func (o *Orchestrator) PrepareRepository(
 
 	manualRepoURL := strings.TrimSpace(req.RepoURL)
 	repoURLs := uniqueStrings(compactStrings(append([]string{manualRepoURL}, repoInfo.RepoURLs...)))
-	repoURL := firstNonEmpty(manualRepoURL, repoInfo.RepoURL)
+	repoURL := strutil.FirstNonEmpty(manualRepoURL, repoInfo.RepoURL)
 
 	repoIdentity := strings.TrimSpace(req.LocalRepoPath)
 	if repoIdentity == "" && strings.TrimSpace(repoInfo.Path) != "" {
@@ -240,7 +241,7 @@ func (o *Orchestrator) PrepareRepository(
 	prepared := PreparedRepo{
 		Provider:     providerName,
 		RepoIdentity: repoIdentity,
-		RepoURL:      firstNonEmpty(repoURL, strings.TrimSpace(req.LocalRepoPath)),
+		RepoURL:      strutil.FirstNonEmpty(repoURL, strings.TrimSpace(req.LocalRepoPath)),
 		RepoURLs:     repoURLs,
 		RepoKey:      workspace.RepoKey(repoIdentity),
 	}
@@ -273,7 +274,7 @@ func (o *Orchestrator) PrepareRepository(
 			return PreparedRepo{}, err
 		}
 		prepared.GitDir = gitDir
-		prepared.RepoURL = firstNonEmpty(usedURL, prepared.RepoURL)
+		prepared.RepoURL = strutil.FirstNonEmpty(usedURL, prepared.RepoURL)
 		return prepared, nil
 	}
 
@@ -283,7 +284,7 @@ func (o *Orchestrator) PrepareRepository(
 		if err != nil {
 			return PreparedRepo{}, err
 		}
-		prepared.RepoURL = firstNonEmpty(usedURL, prepared.RepoURL)
+		prepared.RepoURL = strutil.FirstNonEmpty(usedURL, prepared.RepoURL)
 	}
 	return prepared, nil
 }
@@ -447,16 +448,6 @@ func emitProgress(emit func(string, any), taskID, stage string, percent int, mes
 		Medium:  summary.Medium,
 		Low:     summary.Low,
 	})
-}
-
-func firstNonEmpty(values ...string) string {
-	for _, value := range values {
-		value = strings.TrimSpace(value)
-		if value != "" {
-			return value
-		}
-	}
-	return ""
 }
 
 func compactStrings(items []string) []string {

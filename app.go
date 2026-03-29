@@ -17,6 +17,7 @@ import (
 	"aiguard/internal/logging"
 	"aiguard/internal/provider"
 	"aiguard/internal/review"
+	"aiguard/internal/strutil"
 	"aiguard/internal/task"
 	"aiguard/internal/uiapi"
 	"aiguard/internal/workspace"
@@ -50,7 +51,7 @@ func (a *App) SuggestRepository(req uiapi.StartReviewRequest) (uiapi.RepositoryS
 	repoInfo := provider.Parse(req.MRURL, cfg.Git)
 	manualRepoURL := strings.TrimSpace(req.RepoURL)
 	candidates := uniqueNonEmpty(append([]string{manualRepoURL}, repoInfo.RepoURLs...)...)
-	resolved := firstNonEmpty(manualRepoURL, repoInfo.RepoURL)
+	resolved := strutil.FirstNonEmpty(manualRepoURL, repoInfo.RepoURL)
 
 	message := "未从 MR/PR 链接中识别到仓库地址，可手动填写。"
 	if manualRepoURL != "" {
@@ -349,14 +350,4 @@ func fileURI(path string) string {
 		abs = resolved
 	}
 	return (&url.URL{Scheme: "file", Path: filepath.ToSlash(abs)}).String()
-}
-
-func firstNonEmpty(values ...string) string {
-	for _, value := range values {
-		value = strings.TrimSpace(value)
-		if value != "" {
-			return value
-		}
-	}
-	return ""
 }

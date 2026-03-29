@@ -5,7 +5,6 @@
         <h2>监视配置</h2>
         <p class="small">支持 GitLab MR、GitHub PR 和本地仓库模式。仓库地址会根据 MR/PR 链接自动推导，仍可手动改写。</p>
       </div>
-      <div class="hero-tip small">蓝紫 / 蓝绿风格生产版界面</div>
     </div>
 
     <div class="field">

@@ -301,7 +301,7 @@ onUnmounted(() => {
   <div class="app-shell">
     <header class="hero hero-panel">
       <div>
-        <h1>AI代码监视 Pro</h1>
+        <h1>AI代码监视</h1>
         <p>
           面向生产交付的桌面审计界面：支持 MR/PR 自动识别仓库地址、历史报告回溯、HTML 报告快捷打开，
           并对结果卡片做了默认折叠与可展开详情优化。
@@ -375,13 +375,7 @@ onUnmounted(() => {
         </div>
 
         <div class="card glow-card" v-if="report && doneEvent">
-          <ReportViewer
-            :report="report"
-            :html-path="doneEvent.htmlPath"
-            :report-dir="doneEvent.reportDir"
-            @open-report="openReport"
-            @open-report-dir="openReportDirectory"
-          />
+          <ReportViewer :report="report" />
         </div>
       </section>
     </main>

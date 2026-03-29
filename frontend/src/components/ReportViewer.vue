@@ -5,10 +5,6 @@
         <h2>审计报告</h2>
         <p class="small">默认折叠显示 3 行摘要，点击展开后可查看证据、影响、建议和可选修正代码片段。</p>
       </div>
-      <div class="report-actions">
-        <button class="primary" @click="$emit('open-report')">查看报告</button>
-        <button class="secondary" @click="$emit('open-report-dir')">打开目录</button>
-      </div>
     </div>
 
     <div class="summary-grid">
@@ -121,13 +117,6 @@ function severityClass(severity: string) {
 
 defineProps<{
   report: Report | null
-  htmlPath: string
-  reportDir: string
-}>()
-
-defineEmits<{
-  'open-report': []
-  'open-report-dir': []
 }>()
 </script>
 
@@ -136,28 +125,6 @@ defineEmits<{
   display: flex;
   flex-direction: column;
   gap: 1rem;
-}
-
-.report-actions {
-  display: flex;
-  gap: 0.75rem;
-  flex-wrap: wrap;
-}
-
-button {
-  border: none;
-  border-radius: 1rem;
-  padding: 0.72rem 1rem;
-  color: white;
-  cursor: pointer;
-}
-
-button.primary {
-  background: linear-gradient(135deg, #2563eb, #7c3aed);
-}
-
-button.secondary {
-  background: rgba(51, 65, 85, 0.92);
 }
 
 .summary-grid {
@@ -244,7 +211,13 @@ button.secondary {
 .finding-header h3 {
   margin: 0;
   color: #f8fafc;
-  line-height: 1.45;
+  font-size: 0.95rem;
+  font-weight: 600;
+  line-height: 1.4;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
 }
 
 .tag-row {

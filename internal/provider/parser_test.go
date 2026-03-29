@@ -69,3 +69,43 @@ func TestParseGitHubPullRequest(t *testing.T) {
 		t.Fatalf("unexpected repo url: %s", info.RepoURL)
 	}
 }
+
+func TestParseGenericURLFallsBackToConstructedRepoURL(t *testing.T) {
+	cfg := config.Default()
+	info := Parse("https://git.example.com/team/myapp/some/page", cfg.Git)
+
+	if info.Provider != "generic" {
+		t.Fatalf("expected generic provider, got: %s", info.Provider)
+	}
+	if info.Host != "git.example.com" {
+		t.Fatalf("unexpected host: %s", info.Host)
+	}
+	if info.RepoURL == "" {
+		t.Fatal("expected non-empty RepoURL for generic fallback")
+	}
+	if info.RepoHTTPSURL == "" {
+		t.Fatal("expected non-empty RepoHTTPSURL for generic fallback")
+	}
+	if info.RepoSSHURL == "" {
+		t.Fatal("expected non-empty RepoSSHURL for generic fallback")
+	}
+	if info.Path != "team/myapp/some/page" {
+		t.Fatalf("unexpected path: %s", info.Path)
+	}
+}
+
+func TestParseGenericURLWithEmptyPath(t *testing.T) {
+	cfg := config.Default()
+	info := Parse("https://git.example.com/", cfg.Git)
+
+	if info.Provider != "generic" {
+		t.Fatalf("expected generic provider, got: %s", info.Provider)
+	}
+	if info.Host != "git.example.com" {
+		t.Fatalf("unexpected host: %s", info.Host)
+	}
+	// path 为空时，RepoURL 可为空
+	if info.RepoURL != "" {
+		t.Fatalf("expected empty RepoURL for empty path, got: %s", info.RepoURL)
+	}
+}

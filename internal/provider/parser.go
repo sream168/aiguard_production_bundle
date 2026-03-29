@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"aiguard/internal/config"
+	"aiguard/internal/strutil"
 )
 
 type RepoInfo struct {
@@ -55,9 +56,27 @@ func Parse(raw string, gitCfg config.GitConfig) RepoInfo {
 		return buildRepoInfo("gitlab", sourceHost, sourcePort, repoPath, match[2], gitCfg.GitLab, gitCfg.PreferredProtocol)
 	}
 
+	// generic fallback：即使未匹配 MR/PR 模式，也尝试用 host+path 拼接地址方便调试
+	trimmedPath := strings.Trim(path, "/")
+	if trimmedPath == "" || sourceHost == "" {
+		return RepoInfo{
+			Provider: "generic",
+			Host:     sourceHost,
+		}
+	}
+	repoPath := strings.TrimSuffix(trimmedPath, ".git")
+	sshURL := buildSSHRepoURL(sourceHost, sourcePort, "git", repoPath)
+	httpsURL := buildHTTPSRepoURL("https", sourceHost, sourcePort, repoPath)
+	repoURLs := orderedRepoURLs(gitCfg.PreferredProtocol, sshURL, httpsURL)
+
 	return RepoInfo{
-		Provider: "generic",
-		Host:     sourceHost,
+		Provider:     "generic",
+		Host:         sourceHost,
+		Path:         repoPath,
+		RepoURL:      strutil.FirstNonEmpty(repoURLs...),
+		RepoSSHURL:   sshURL,
+		RepoHTTPSURL: httpsURL,
+		RepoURLs:     repoURLs,
 	}
 }
 
@@ -90,7 +109,7 @@ func buildRepoInfo(provider, fallbackHost, fallbackPort, repoPath, number string
 		Name:         name,
 		Number:       strings.TrimSpace(number),
 		Path:         repoPath,
-		RepoURL:      firstNonEmpty(repoURLs...),
+		RepoURL:      strutil.FirstNonEmpty(repoURLs...),
 		RepoSSHURL:   sshURL,
 		RepoHTTPSURL: httpsURL,
 		RepoURLs:     repoURLs,
@@ -98,9 +117,9 @@ func buildRepoInfo(provider, fallbackHost, fallbackPort, repoPath, number string
 }
 
 func effectiveEndpoint(cfg config.GitEndpointConfig, fallbackHost, fallbackPort string) (string, string, string) {
-	host := firstNonEmpty(strings.TrimSpace(cfg.Host), strings.TrimSpace(fallbackHost))
-	port := firstNonEmpty(strings.TrimSpace(cfg.Port), strings.TrimSpace(fallbackPort))
-	user := firstNonEmpty(strings.TrimSpace(cfg.User), "git")
+	host := strutil.FirstNonEmpty(strings.TrimSpace(cfg.Host), strings.TrimSpace(fallbackHost))
+	port := strutil.FirstNonEmpty(strings.TrimSpace(cfg.Port), strings.TrimSpace(fallbackPort))
+	user := strutil.FirstNonEmpty(strings.TrimSpace(cfg.User), "git")
 	return host, port, user
 }
 
@@ -168,12 +187,3 @@ func orderedRepoURLs(preferredProtocol, sshURL, httpsURL string) []string {
 	return urls
 }
 
-func firstNonEmpty(values ...string) string {
-	for _, value := range values {
-		value = strings.TrimSpace(value)
-		if value != "" {
-			return value
-		}
-	}
-	return ""
-}
